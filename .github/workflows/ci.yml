@@ -1,0 +1,93 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [18, 20]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        
+    - name: Install dependencies with fallback
+      run: |
+        npm ci || (echo "npm ci failed, trying with fresh install..." && npm cache clean --force && rm -rf node_modules package-lock.json && npm install)
+      
+    - name: Run TypeScript compiler
+      run: npm run compile
+      
+    - name: Check if build artifacts exist
+      run: |
+        if [ ! -f "out/extension.js" ]; then
+          echo "Build failed: extension.js not found"
+          exit 1
+        fi
+      shell: bash
+
+  build-and-package:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        
+    - name: Install dependencies with fallback
+      run: |
+        npm ci || (echo "npm ci failed, trying with fresh install..." && npm cache clean --force && rm -rf node_modules package-lock.json && npm install)
+      
+    - name: Install VSCE globally
+      run: npm install -g @vscode/vsce
+      
+    - name: Compile and build
+      run: npm run compile
+      
+    - name: Package extension
+      run: npm run package
+      
+    - name: Get package version
+      id: package-version
+      run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      
+    - name: Rename VSIX file if needed
+      run: |
+        VSIX_FILE=$(ls *.vsix)
+        EXPECTED_NAME="dumpstorm-${{ steps.package-version.outputs.version }}.vsix"
+        if [ "$VSIX_FILE" != "$EXPECTED_NAME" ]; then
+          echo "Renaming $VSIX_FILE to $EXPECTED_NAME"
+          mv "$VSIX_FILE" "$EXPECTED_NAME"
+        else
+          echo "VSIX file already has correct name: $VSIX_FILE"
+        fi
+      
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dumpstorm-${{ steps.package-version.outputs.version }}
+        path: 'dumpstorm-*.vsix'
+        retention-days: 30

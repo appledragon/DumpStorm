@@ -1,0 +1,106 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v* 标签时触发（如 v1.0.0, v1.2.3-beta.1）
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        
+    - name: Install dependencies with fallback
+      run: |
+        npm ci || (echo "npm ci failed, trying with fresh install..." && npm cache clean --force && rm -rf node_modules package-lock.json && npm install)
+      
+    - name: Install VSCE globally (fallback)
+      run: npm install -g @vscode/vsce
+      
+    - name: Get package version
+      id: package-version
+      run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      
+    - name: Compile TypeScript
+      run: npm run compile
+      
+    - name: Package extension
+      run: npm run package
+      
+    - name: Rename VSIX file if needed
+      run: |
+        VSIX_FILE=$(ls *.vsix)
+        EXPECTED_NAME="dumpstorm-${{ steps.package-version.outputs.version }}.vsix"
+        if [ "$VSIX_FILE" != "$EXPECTED_NAME" ]; then
+          echo "Renaming $VSIX_FILE to $EXPECTED_NAME"
+          mv "$VSIX_FILE" "$EXPECTED_NAME"
+        else
+          echo "VSIX file already has correct name: $VSIX_FILE"
+        fi
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        if [ -f CHANGELOG.md ]; then
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          sed -n '/^## \[/,/^## \[/p' CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "changelog=Automated release for version ${{ steps.package-version.outputs.version }}" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+        name: "DumpStorm v${{ steps.package-version.outputs.version }}"
+        body: |
+          ## DumpStorm v${{ steps.package-version.outputs.version }}
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ### Installation
+          - Download the `.vsix` file from the assets below
+          - In VS Code, go to Extensions view (Ctrl+Shift+X)
+          - Click the "..." menu and select "Install from VSIX..."
+          - Choose the downloaded `.vsix` file
+          
+          ### What's New
+          See the changelog in the repository for detailed changes.
+        files: 'dumpstorm-*.vsix'
+        draft: false
+        prerelease: ${{ github.event.inputs.prerelease || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+        generate_release_notes: true
+        fail_on_unmatched_files: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-dumpstorm-${{ steps.package-version.outputs.version }}
+        path: 'dumpstorm-*.vsix'
+        retention-days: 90

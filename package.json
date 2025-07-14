@@ -1,0 +1,249 @@
+{
+  "name": "minidump-parser",
+  "displayName": "Minidump Parser",
+  "description": "Powerful crash dump analyzer for native applications. Analyze minidump files (.dmp), extract symbols, enhance stack traces, and analyze crashes with register tooltips and multilingual support.",
+  "version": "1.0.1",
+  "publisher": "CuiLiAn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appledragon/DumpStorm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/appledragon/DumpStorm/issues"
+  },
+  "homepage": "https://github.com/appledragon/DumpStorm#readme",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey",
+      "href": "https://github.com/appledragon/DumpStorm",
+      "description": "Cross-platform support"
+    }
+  ],
+  "keywords": [
+    "crash",
+    "dump",
+    "minidump",
+    "crash analysis",
+    "stack trace",
+    "symbols",
+    "breakpad",
+    "crash dump",
+    "postmortem",
+    "dmp",
+    "stackwalk",
+    "registers",
+    "memory",
+    "exception",
+    "segfault",
+    "access violation",
+    "cross-platform",
+    "symbol extraction",
+    "nm",
+    "llvm",
+    "crash reporter",
+    "fault analysis",
+    "null pointer",
+    "buffer overflow",
+    "crash reporting",
+    "root cause",
+    "failure analysis",
+    "diagnostic"
+  ],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "minidump-parser-explorer",
+          "title": "Minidump Parser",
+          "icon": "$(pulse)"
+        }
+      ]
+    },
+    "views": {
+      "minidump-parser-explorer": [
+        {
+          "id": "minidump-parser-panel",
+          "name": "Crash Analysis",
+          "when": "true",
+          "icon": "$(bug)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "minidump-parser.analyzeDump",
+        "title": "Analyze Crash Dump",
+        "icon": "$(search)"
+      },
+      {
+        "command": "minidump-parser.setSymbolPath",
+        "title": "Set Symbol Path",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "minidump-parser.openDumpFile",
+        "title": "Open Dump File",
+        "icon": "$(file)"
+      },
+      {
+        "command": "minidump-parser.extractSymbols",
+        "title": "Extract Symbols with nm/llvm-nm",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "minidump-parser.enhanceStackTrace",
+        "title": "Enhance Stack Trace",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "minidump-parser.installStackwalk",
+        "title": "Install Analysis Tools",
+        "icon": "$(download)"
+      },
+      {
+        "command": "minidump-parser.installLlvmNm",
+        "title": "Install llvm-nm",
+        "icon": "$(download)"
+      },
+      {
+        "command": "minidump-parser.installLlvmNmCurl",
+        "title": "Install llvm-nm (Reliable Method)",
+        "icon": "$(download)"
+      },
+      {
+        "command": "minidump-parser.setCustomMinidumpStackwalkPath",
+        "title": "Set Custom minidump_stackwalk Path",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "minidump-parser.setCustomNmPath",
+        "title": "Set Custom nm/llvm-nm Path",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "minidump-parser.setCustomLlvmNmPath",
+        "title": "Set Custom llvm-nm Path",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "minidump-parser.resetCustomPaths",
+        "title": "Reset Custom Tool Paths",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "minidump-parser.switchDumpFile",
+        "title": "Switch to Dump File",
+        "icon": "$(file)"
+      },
+      {
+        "command": "minidump-parser.closeSingleDumpFile",
+        "title": "Close This Dump File",
+        "icon": "$(close)"
+      },
+      {
+        "command": "minidump-parser.closeAllDumpFiles",
+        "title": "Close All Dump Files",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "minidump-parser.testRegisterTooltip",
+        "title": "Test Register Tooltip",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "minidump-parser.switchLanguage",
+        "title": "Switch Language / 切换语言",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "minidump-parser.about",
+        "title": "About Minidump Parser",
+        "icon": "$(info)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "minidump-parser.closeSingleDumpFile",
+          "when": "view == minidump-parser-panel && viewItem == dumpFileItem",
+          "group": "inline"
+        },
+        {
+          "command": "minidump-parser.closeAllDumpFiles",
+          "when": "view == minidump-parser-panel && viewItem == dumpFilesWithFiles",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Minidump Parser Settings",
+      "properties": {
+        "minidump-parser.symbolPath": {
+          "type": "string",
+          "default": "/tmp/symbols",
+          "description": "Path to symbol files"
+        },
+        "minidump-parser.customMinidumpStackwalkPath": {
+          "type": "string",
+          "description": "Custom path to minidump_stackwalk executable (leave empty to use system default)"
+        },
+        "minidump-parser.customNmPath": {
+          "type": "string",
+          "description": "Custom path to nm or llvm-nm executable (leave empty to use system default)"
+        },
+        "minidump-parser.customLlvmNmPath": {
+          "type": "string",
+          "description": "Custom path to llvm-nm executable (leave empty to use system default)"
+        },
+        "minidump-parser.language": {
+          "type": "string",
+          "enum": [
+            "en",
+            "zh-cn"
+          ],
+          "enumDescriptions": [
+            "English",
+            "简体中文"
+          ],
+          "default": "en",
+          "description": "Language for register tooltips and UI elements"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && npm run copy-locales",
+    "copy-locales": "node -e \"const fs = require('fs'); const path = require('path'); const srcDir = 'src/localization/locales'; const outDir = 'out/localization/locales'; if (!fs.existsSync(outDir)) { fs.mkdirSync(outDir, { recursive: true }); } fs.readdirSync(srcDir).forEach(file => { if (file.endsWith('.json')) { fs.copyFileSync(path.join(srcDir, file), path.join(outDir, file)); } });\"",
+    "watch": "tsc -watch -p ./ & npm run watch-locales",
+    "watch-locales": "node -e \"const fs = require('fs'); const path = require('path'); const srcDir = 'src/localization/locales'; const outDir = 'out/localization/locales'; if (!fs.existsSync(outDir)) { fs.mkdirSync(outDir, { recursive: true }); } fs.readdirSync(srcDir).forEach(file => { if (file.endsWith('.json')) { fs.copyFileSync(path.join(srcDir, file), path.join(outDir, file)); } });\"",
+    "package": "vsce package",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.32.0",
+    "jest": "^30.0.4",
+    "sharp": "^0.34.3",
+    "ts-jest": "^29.4.0",
+    "typescript": "^4.9.5"
+  }
+}

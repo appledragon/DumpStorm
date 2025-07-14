@@ -1,0 +1,33 @@
+<!-- filepath: g:\project\DumpStorm\resources\icon.svg -->
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="stormGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lightningGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#feca57;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff6b6b;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- 背景圆 -->
+  <circle cx="128" cy="128" r="120" fill="url(#stormGradient)" opacity="0.9"/>
+  
+  <!-- 云朵形状 -->
+  <path d="M 80 100 Q 80 70, 110 70 Q 130 50, 150 70 Q 180 70, 180 100 Q 200 100, 200 120 Q 200 140, 180 140 L 80 140 Q 60 140, 60 120 Q 60 100, 80 100 Z" 
+        fill="white" opacity="0.9"/>
+  
+  <!-- 闪电/数据流 -->
+  <path d="M 120 110 L 100 140 L 115 140 L 105 170 L 135 130 L 120 130 L 130 110 Z" 
+        fill="url(#lightningGradient)" stroke="#feca57" stroke-width="2"/>
+  
+  <!-- 数据点 -->
+  <circle cx="90" cy="180" r="8" fill="#48dbfb" opacity="0.8"/>
+  <circle cx="128" cy="190" r="10" fill="#0abde3" opacity="0.8"/>
+  <circle cx="166" cy="180" r="8" fill="#48dbfb" opacity="0.8"/>
+  
+  <!-- 连接线 -->
+  <path d="M 105 170 Q 128 185, 128 190" stroke="#0abde3" stroke-width="3" fill="none" opacity="0.6"/>
+  <path d="M 135 165 Q 145 175, 166 180" stroke="#0abde3" stroke-width="3" fill="none" opacity="0.6"/>
+</svg>

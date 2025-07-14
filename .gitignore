@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/**
+
+# VS Code specific
+.vscode/**
+.vscode-test/**
+
+# Build output
+out/**
+*.vsix
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Test data
+test_data/
+*.dmp
+*.dump
+
+# Development scripts
+test.sh
+check_tool.sh
+/coverage
