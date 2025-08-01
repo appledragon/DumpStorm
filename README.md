@@ -28,7 +28,7 @@ A powerful Visual Studio Code extension for analyzing crash dump files (minidump
 3. Open a crash dump file (.dmp) or text-based crash log
 4. Start analyzing!
 
-## � Supported File Types
+## 📁 Supported File Types
 
 ### ✅ **Minidump Files** (.dmp, .dump)
 - Complete crash analysis with stack traces, register dumps, and memory information
@@ -83,24 +83,7 @@ To add new languages:
 3. Translate strings from `en.json`
 4. Submit pull request
 
-## 🚀 Development
-
-```bash
-git clone https://github.com/appledragon/DumpStorm.git
-cd DumpStorm
-npm install
-npm run compile
-npm run package  # Creates .vsix file
-```
 
 ## 🐛 Known Issues
 - First-time tool installation requires internet connection
 - **Only supports minidumps
-
-## 📝 Release Notes
-
-### 1.0.0
-- Initial release with sidebar panel interface
-- Minidump analysis and text-based crash enhancement
-- Auto-installation of analysis tools
-- Cross-platform support

@@ -238,7 +238,7 @@
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "@types/node": "^18.0.0",
+    "@types/node": "^18.19.121",
     "@types/vscode": "^1.75.0",
     "@vscode/vsce": "^2.32.0",
     "jest": "^30.0.4",

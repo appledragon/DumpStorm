@@ -281,7 +281,7 @@
     "enhanceStackTrace": "Enhance Stack Trace",
     "openNewDumpFile": "Open New Dump File",
     "openDumpFile": "Open Dump File",
-    "clickToOpenDumpFile": "📁 Click to Open Dump File",
+    "clickToOpenDumpFile": "Click to Open Dump File",
     "switchToDumpFile": "Switch to this dump file",
     "customMinidumpPath": "Custom minidump_stackwalk",
     "customNmPath": "Custom nm/llvm-nm",
