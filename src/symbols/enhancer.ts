@@ -163,8 +163,8 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
     for (const line of lines) {
         let enhancedLine = line;
         
-        // Look for offset patterns like "libOpenssl.so + 0x149840" (already relative addresses)
-        const offsetMatch = line.match(/([^\s]+\.(?:so|dylib|dll))\s*\+\s*0x([0-9a-fA-F]+)/i);
+        // Look for offset patterns like "libOpenssl.so + 0x149840" or "dyld + 0x33601" (already relative addresses)
+        const offsetMatch = line.match(/([^\s]+(?:\.(?:so|dylib|dll))?)\s*\+\s*0x([0-9a-fA-F]+)/i);
         if (offsetMatch) {
             const [, libName, offsetStr] = offsetMatch;
             const offset = parseInt(offsetStr, 16);
@@ -230,7 +230,7 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
         }
         // Look for stack frame patterns with absolute addresses
         else {
-            const stackFrameMatch = line.match(/(\d+)\s+([^\s]+\.(?:so|dylib|dll))\s*\+?\s*0x([0-9a-fA-F]+)/i);
+            const stackFrameMatch = line.match(/(\d+)\s+([^\s]+(?:\.(?:so|dylib|dll))?)\s*\+?\s*0x([0-9a-fA-F]+)/i);
             if (stackFrameMatch) {
                 const [, frameNum, libName, addressStr] = stackFrameMatch;
                 const address = parseInt(addressStr, 16);
@@ -250,8 +250,8 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
                 }
             }
             
-            // Also look for direct address patterns (support .so, .dylib, .dll)
-            const directAddressMatch = line.match(/([^\s]+\.(?:so|dylib|dll))!0x([0-9a-fA-F]+)/i);
+            // Also look for direct address patterns (support .so, .dylib, .dll and extensionless libraries like dyld)
+            const directAddressMatch = line.match(/([^\s]+(?:\.(?:so|dylib|dll))?)!0x([0-9a-fA-F]+)/i);
             if (directAddressMatch && !stackFrameMatch) {
                 const [, libName, addressStr] = directAddressMatch;
                 const address = parseInt(addressStr, 16);
