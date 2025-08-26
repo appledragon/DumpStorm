@@ -235,7 +235,7 @@ export async function analyzeDumpFile(context: vscode.ExtensionContext, dumpPath
             // Create a new document with the analysis result
             const doc = await vscode.workspace.openTextDocument({
                 content: analysisResult,
-                language: 'plaintext'  // 使用plaintext而不是text，确保hover provider能正确识别
+                language: 'plaintext'  // use plaintext instead of text，ensure hover provider can recognize
             });
             
             progress.report({ increment: 100, message: "Analysis complete!" });
