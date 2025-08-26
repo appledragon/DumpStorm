@@ -240,7 +240,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                             arguments: [filePath]
                         },
                         'dumpFileItem',
-                        filePath  // 传递filePath用于关闭按钮
+                        filePath  // for close button
                     ));
                 }
                 
@@ -360,7 +360,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
         }
     }
 
-    // 关闭所有dump文件
+    // close all dump files
     closeAllDumpFiles() {
         this.openDumpFiles.clear();
         this.saveDumpFilesToWorkspace();
@@ -727,7 +727,7 @@ export class BreakpadItem extends vscode.TreeItem {
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly command?: vscode.Command,
         public readonly contextValue?: string,
-        public readonly filePath?: string  // 添加filePath参数用于关闭特定文件
+        public readonly filePath?: string  // for close file
     ) {
         super(label, collapsibleState);
         this.tooltip = this.label;
