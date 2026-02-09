@@ -9,69 +9,64 @@ import { enhanceStackTraceWithSymbols } from '../symbols/enhancer';
 import { localization } from '../localization/localization';
 
 export async function getBinaryPath(context: vscode.ExtensionContext): Promise<string> {
-    return new Promise(async (resolve, reject) => {
-        // First check if user has specified a custom minidump_stackwalk path
-        const customPath = getCustomMinidumpStackwalkPath();
-        if (customPath && isValidMinidumpStackwalkPath(customPath)) {
-            console.log(`Using custom minidump-stackwalk path: ${customPath}`);
-            resolve(customPath);
-            return;
+    // First check if user has specified a custom minidump_stackwalk path
+    const customPath = getCustomMinidumpStackwalkPath();
+    if (customPath && isValidMinidumpStackwalkPath(customPath)) {
+        console.log(`Using custom minidump-stackwalk path: ${customPath}`);
+        return customPath;
+    }
+    
+    const platform = os.platform();
+    
+    // Determine the correct binary name and path based on platform
+    const binaryName = getBinaryName(platform, 'minidump_stackwalk');
+    const dumpstormPath = path.join(os.homedir(), MINIDUMP_STACKWALK_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN, binaryName);
+    
+    if (fs.existsSync(dumpstormPath)) {
+        console.log(`Found minidump-stackwalk at: ${dumpstormPath}`);
+        return dumpstormPath;
+    }
+    
+    // Check system PATH for minidump-stackwalk
+    try {
+        const whichCommand = platform === 'win32' ? 'where' : 'which';
+        const whichResult = execSync(`${whichCommand} ${binaryName}`, { encoding: 'utf8' }).trim();
+        if (whichResult && fs.existsSync(whichResult)) {
+            console.log(`Found minidump-stackwalk in PATH: ${whichResult}`);
+            return whichResult;
         }
-        
-        const platform = os.platform();
-        
-        // Determine the correct binary name and path based on platform
-        const binaryName = getBinaryName(platform, 'minidump_stackwalk');
-        const dumpstormPath = path.join(os.homedir(), MINIDUMP_STACKWALK_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN, binaryName);
-        
-        if (fs.existsSync(dumpstormPath)) {
-            console.log(`Found minidump-stackwalk at: ${dumpstormPath}`);
-            resolve(dumpstormPath);
-            return;
-        }
-        
-        // Check system PATH for minidump-stackwalk
+    } catch (error) {
+        // minidump-stackwalk not found in PATH
+    }
+    
+    // If not found, prompt user to install
+    const response = await vscode.window.showWarningMessage(
+        localization.getUI('minidumpStackwalkNotFound'),
+        localization.getUI('autoInstall'), localization.getUI('manualInstall'), localization.getUI('cancel')
+    );
+    
+    if (response === localization.getUI('autoInstall')) {
         try {
-            const whichCommand = platform === 'win32' ? 'where' : 'which';
-            const whichResult = execSync(`${whichCommand} ${binaryName}`, { encoding: 'utf8' }).trim();
-            if (whichResult && fs.existsSync(whichResult)) {
-                console.log(`Found minidump-stackwalk in PATH: ${whichResult}`);
-                resolve(whichResult);
-                return;
+            await installMinidumpStackwalk();
+            // Check again after installation
+            if (fs.existsSync(dumpstormPath)) {
+                return dumpstormPath;
+            } else {
+                throw new Error(localization.getUI('installationCompletedButNotFound'));
             }
         } catch (error) {
-            // minidump-stackwalk not found in PATH
+            throw new Error(localization.format(localization.getUI('installationFailed'), error));
         }
+    } else if (response === localization.getUI('manualInstall')) {
+        const installInstructions = platform === 'win32' 
+            ? localization.format(localization.getUI('downloadWindowsVersion'), MINIDUMP_STACKWALK_CONFIG.DOWNLOAD_URLS.WIN32)
+            : localization.format(localization.getUI('downloadAndExtract'), getDownloadUrl(platform, os.arch()));
         
-        // If not found, prompt user to install
-        const response = await vscode.window.showWarningMessage(
-            localization.getUI('minidumpStackwalkNotFound'),
-            localization.getUI('autoInstall'), localization.getUI('manualInstall'), localization.getUI('cancel')
-        );
-        
-        if (response === localization.getUI('autoInstall')) {
-            try {
-                await installMinidumpStackwalk();
-                // Check again after installation
-                if (fs.existsSync(dumpstormPath)) {
-                    resolve(dumpstormPath);
-                } else {
-                    reject(new Error(localization.getUI('installationCompletedButNotFound')));
-                }
-            } catch (error) {
-                reject(new Error(localization.format(localization.getUI('installationFailed'), error)));
-            }
-        } else if (response === localization.getUI('manualInstall')) {
-            const installInstructions = platform === 'win32' 
-                ? localization.format(localization.getUI('downloadWindowsVersion'), MINIDUMP_STACKWALK_CONFIG.DOWNLOAD_URLS.WIN32)
-                : localization.format(localization.getUI('downloadAndExtract'), getDownloadUrl(platform, os.arch()));
-            
-            vscode.window.showInformationMessage(installInstructions);
-            reject(new Error(localization.getUI('userChoseManualInstallation')));
-        } else {
-            reject(new Error('User cancelled installation'));
-        }
-    });
+        vscode.window.showInformationMessage(installInstructions);
+        throw new Error(localization.getUI('userChoseManualInstallation'));
+    } else {
+        throw new Error('User cancelled installation');
+    }
 }
 
 export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: string, symbolPath: string): Promise<string> {
@@ -93,7 +88,7 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
     console.log(`  Symbol path: ${symbolPath}`);
     console.log(`  Command: ${exe} "${dumpPath}" "${symbolPath}"`);
 
-    return new Promise(async (resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
         execFile(exe, [dumpPath, symbolPath], async (err: Error | null, stdout: string, stderr: string) => {
             // Always log stderr for debugging
             if (stderr && stderr.trim().length > 0) {

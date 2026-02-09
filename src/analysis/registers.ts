@@ -11,6 +11,14 @@ export interface RegisterInfo {
 
 export class RegisterTooltipProvider implements vscode.HoverProvider {
     private registerDatabase: Map<string, RegisterInfo> = new Map();
+    
+    // Shared 16-bit and 8-bit register variant mappings
+    private static readonly REGISTER_VARIANTS = new Map([
+        ['ax', 'eax'], ['bx', 'ebx'], ['cx', 'ecx'], ['dx', 'edx'],
+        ['al', 'eax'], ['bl', 'ebx'], ['cl', 'ecx'], ['dl', 'edx'],
+        ['ah', 'eax'], ['bh', 'ebx'], ['ch', 'ecx'], ['dh', 'edx'],
+        ['si', 'esi'], ['di', 'edi'], ['sp', 'esp'], ['bp', 'ebp'],
+    ]);
 
     constructor() {
         this.initializeRegisterDatabase();
@@ -198,14 +206,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
 
     private addRegisterVariants() {
         // Add 16-bit and 8-bit register variants
-        const variants = new Map([
-            ['ax', 'eax'], ['bx', 'ebx'], ['cx', 'ecx'], ['dx', 'edx'],
-            ['al', 'eax'], ['bl', 'ebx'], ['cl', 'ecx'], ['dl', 'edx'],
-            ['ah', 'eax'], ['bh', 'ebx'], ['ch', 'ecx'], ['dh', 'edx'],
-            ['si', 'esi'], ['di', 'edi'], ['sp', 'esp'], ['bp', 'ebp'],
-        ]);
-
-        for (const [variant, base] of variants) {
+        for (const [variant, base] of RegisterTooltipProvider.REGISTER_VARIANTS) {
             const baseInfo = this.registerDatabase.get(base);
             if (baseInfo) {
                 this.registerDatabase.set(variant, {
@@ -433,14 +434,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         }
 
         // Handle 16-bit/8-bit register variants
-        const registerVariants = new Map([
-            ['ax', 'eax'], ['bx', 'ebx'], ['cx', 'ecx'], ['dx', 'edx'],
-            ['al', 'eax'], ['bl', 'ebx'], ['cl', 'ecx'], ['dl', 'edx'],
-            ['ah', 'eax'], ['bh', 'ebx'], ['ch', 'ecx'], ['dh', 'edx'],
-            ['si', 'esi'], ['di', 'edi'], ['sp', 'esp'], ['bp', 'ebp'],
-        ]);
-
-        const baseRegister = registerVariants.get(lowerWord);
+        const baseRegister = RegisterTooltipProvider.REGISTER_VARIANTS.get(lowerWord);
         if (baseRegister && this.registerDatabase.has(baseRegister)) {
             const baseInfo = this.registerDatabase.get(baseRegister)!;
             return {
@@ -490,15 +484,15 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         return undefined;
     }
 
+    /**
+     * Parse a hex value string (with or without 0x prefix) to a number
+     */
+    private parseHexValue(value: string): number {
+        return parseInt(value, 16);
+    }
+
     private interpretRegisterValue(value: string): string | undefined {
-        let numValue: number;
-        
-        // Parse hexadecimal value
-        if (value.startsWith('0x')) {
-            numValue = parseInt(value, 16);
-        } else {
-            numValue = parseInt(value, 16);
-        }
+        const numValue = this.parseHexValue(value);
 
         if (isNaN(numValue)) {
             return undefined;
@@ -538,13 +532,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
 
     private analyzeCrashContext(registerName: string, value: string, line: string): string | undefined {
         const lowerRegisterName = registerName.toLowerCase();
-        let numValue: number;
-        
-        if (value.startsWith('0x')) {
-            numValue = parseInt(value, 16);
-        } else {
-            numValue = parseInt(value, 16);
-        }
+        const numValue = this.parseHexValue(value);
 
         if (isNaN(numValue)) {
             return undefined;

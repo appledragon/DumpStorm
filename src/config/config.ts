@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as vscode from 'vscode';
 
 export const MINIDUMP_STACKWALK_CONFIG = {
     VERSION: 'nightly',
@@ -224,106 +225,67 @@ export const DEFAULT_CONFIG = {
     HOME_SYMBOL_PATH: 'symbols'
 };
 
+// Helper function to get custom tool path from VS Code settings
+function getCustomSettingPath(settingName: string): string | undefined {
+    const config = vscode.workspace.getConfiguration('minidump-parser');
+    return config.get(settingName) as string | undefined;
+}
+
 // Helper function to get custom minidump_stackwalk path from VS Code settings
 export function getCustomMinidumpStackwalkPath(): string | undefined {
-    const vscode = require('vscode');
-    const config = vscode.workspace.getConfiguration('minidump-parser');
-    return config.get('customMinidumpStackwalkPath') as string | undefined;
+    return getCustomSettingPath('customMinidumpStackwalkPath');
 }
 
 // Helper function to get custom llvm-nm path from VS Code settings
 export function getCustomLlvmNmPath(): string | undefined {
-    const vscode = require('vscode');
-    const config = vscode.workspace.getConfiguration('minidump-parser');
-    return config.get('customLlvmNmPath') as string | undefined;
+    return getCustomSettingPath('customLlvmNmPath');
 }
 
 // Helper function to get custom nm path from VS Code settings
 export function getCustomNmPath(): string | undefined {
-    const vscode = require('vscode');
-    const config = vscode.workspace.getConfiguration('minidump-parser');
-    return config.get('customNmPath') as string | undefined;
+    return getCustomSettingPath('customNmPath');
+}
+
+// Helper function to check if a path points to a valid executable
+function isValidExecutablePath(customPath: string): boolean {
+    try {
+        if (!fs.existsSync(customPath)) {
+            return false;
+        }
+        
+        const stats = fs.statSync(customPath);
+        if (!stats.isFile()) {
+            return false;
+        }
+        
+        // Check if it's executable (on Unix-like systems)
+        if (os.platform() !== 'win32') {
+            try {
+                fs.accessSync(customPath, fs.constants.X_OK);
+            } catch (error) {
+                return false;
+            }
+        }
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
 }
 
 // Helper function to check if a custom minidump_stackwalk path is valid
 export function isValidMinidumpStackwalkPath(customPath: string): boolean {
-    try {
-        if (!fs.existsSync(customPath)) {
-            return false;
-        }
-        
-        const stats = fs.statSync(customPath);
-        if (!stats.isFile()) {
-            return false;
-        }
-        
-        // Check if it's executable (on Unix-like systems)
-        if (os.platform() !== 'win32') {
-            try {
-                fs.accessSync(customPath, fs.constants.X_OK);
-            } catch (error) {
-                return false;
-            }
-        }
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
+    return isValidExecutablePath(customPath);
 }
 
 // Helper function to check if a custom llvm-nm path is valid
 export function isValidLlvmNmPath(customPath: string): boolean {
-    try {
-        if (!fs.existsSync(customPath)) {
-            return false;
-        }
-        
-        const stats = fs.statSync(customPath);
-        if (!stats.isFile()) {
-            return false;
-        }
-        
-        // Check if it's executable (on Unix-like systems)
-        if (os.platform() !== 'win32') {
-            try {
-                fs.accessSync(customPath, fs.constants.X_OK);
-            } catch (error) {
-                return false;
-            }
-        }
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
+    return isValidExecutablePath(customPath);
 }
 
 // Helper function to check if a custom nm path is valid
 export function isValidNmPath(customPath: string): boolean {
-    try {
-        if (!fs.existsSync(customPath)) {
-            return false;
-        }
-        
-        const stats = fs.statSync(customPath);
-        if (!stats.isFile()) {
-            return false;
-        }
-        
-        // Check if it's executable (on Unix-like systems)
-        if (os.platform() !== 'win32') {
-            try {
-                fs.accessSync(customPath, fs.constants.X_OK);
-            } catch (error) {
-                return false;
-            }
-        }
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
+    return isValidExecutablePath(customPath);
 }
 
 // Dynamic library file extensions for different platforms
@@ -348,20 +310,19 @@ export function getAllDynamicLibraryExtensions(): string[] {
 // Helper function to check if a file is a dynamic library
 export function isDynamicLibrary(filePath: string): boolean {
     const extensions = getDynamicLibraryExtensions();
-    const ext = require('path').extname(filePath).toLowerCase();
+    const ext = path.extname(filePath).toLowerCase();
     return extensions.includes(ext);
 }
 
 // Helper function to check if a file is a dynamic library (cross-platform)
 export function isDynamicLibraryCrossPlatform(filePath: string): boolean {
     const extensions = getAllDynamicLibraryExtensions();
-    const ext = require('path').extname(filePath).toLowerCase();
+    const ext = path.extname(filePath).toLowerCase();
     return extensions.includes(ext);
 }
 
 // Helper function to recursively find all dynamic libraries in a directory
 export function findDynamicLibraries(directoryPath: string, recursive: boolean = true): string[] {
-    const path = require('path');
     const libraries: string[] = [];
     
     try {
