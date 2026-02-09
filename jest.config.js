@@ -9,6 +9,9 @@ module.exports = {
     }],
   },
   moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleNameMapper: {
+    '^vscode$': '<rootDir>/ut/__mocks__/vscode.ts'
+  },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',

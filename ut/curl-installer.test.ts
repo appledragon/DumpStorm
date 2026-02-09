@@ -25,14 +25,18 @@ jest.mock('fs', () => ({
   existsSync: jest.fn(),
   mkdirSync: jest.fn(),
   chmodSync: jest.fn(),
+  copyFileSync: jest.fn(),
   createWriteStream: jest.fn(),
   readdirSync: jest.fn(),
-  statSync: jest.fn()
+  statSync: jest.fn(),
+  unlinkSync: jest.fn(),
+  rmSync: jest.fn()
 }));
 
 // Mock child_process
 jest.mock('child_process', () => ({
-  spawn: jest.fn()
+  spawn: jest.fn(),
+  execSync: jest.fn()
 }));
 
 // Mock localization
@@ -48,7 +52,9 @@ jest.mock('../src/localization/localization', () => ({
         'installationStarting': 'Installation starting...',
         'downloadingFile': 'Downloading file...',
         'extractingFiles': 'Extracting files...',
-        'settingPermissions': 'Setting permissions...'
+        'settingPermissions': 'Setting permissions...',
+        'installer.installationCancelledByUser': 'Installation cancelled by user',
+        'installer.downloadFailed': 'Failed to download via curl: %s'
       };
       return messages[key] || key;
     }),
@@ -184,18 +190,6 @@ describe('CurlBaseInstaller', () => {
     });
 
     it('should handle successful curl download', async () => {
-      // Mock successful curl process
-      const mockSpawn = {
-        on: jest.fn((event: string, callback: (code: number) => void) => {
-          if (event === 'close') {
-            setTimeout(() => callback(0), 100); // Success
-          }
-        }),
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() }
-      };
-      mockChildProcess.spawn.mockReturnValue(mockSpawn);
-
       // Mock file system operations
       mockFs.existsSync.mockReturnValue(true);
       mockFs.statSync.mockReturnValue({ size: 1024 });
@@ -204,7 +198,7 @@ describe('CurlBaseInstaller', () => {
       const binaryInfo = installer.testGetBinaryInfo('linux', 'x64');
       
       // Start the installation
-      const installPromise = installer.testInstallWithCurl(
+      await installer.testInstallWithCurl(
         binaryInfo,
         mockProgress,
         mockResolve,
@@ -212,30 +206,24 @@ describe('CurlBaseInstaller', () => {
         mockToken
       );
 
-      // Wait for the installation to complete
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for setTimeout resolve
+      await new Promise(resolve => setTimeout(resolve, 2100));
 
-      expect(mockChildProcess.spawn).toHaveBeenCalled();
+      expect(mockChildProcess.execSync).toHaveBeenCalled();
       expect(mockProgress.report).toHaveBeenCalled();
+      expect(mockReject).not.toHaveBeenCalled();
     });
 
     it('should handle curl download failure', async () => {
-      // Mock failed curl process
-      const mockSpawn = {
-        on: jest.fn((event: string, callback: (code: number) => void) => {
-          if (event === 'close') {
-            setTimeout(() => callback(1), 100); // Failure
-          }
-        }),
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() }
-      };
-      mockChildProcess.spawn.mockReturnValue(mockSpawn);
+      // Mock failed execSync (curl download fails)
+      mockChildProcess.execSync.mockImplementation(() => {
+        throw new Error('curl: (7) Failed to connect to host');
+      });
 
       const binaryInfo = installer.testGetBinaryInfo('linux', 'x64');
       
       // Start the installation
-      const installPromise = installer.testInstallWithCurl(
+      await installer.testInstallWithCurl(
         binaryInfo,
         mockProgress,
         mockResolve,
@@ -243,10 +231,6 @@ describe('CurlBaseInstaller', () => {
         mockToken
       );
 
-      // Wait for the installation to complete
-      await new Promise(resolve => setTimeout(resolve, 200));
-
-      expect(mockChildProcess.spawn).toHaveBeenCalled();
       expect(mockReject).toHaveBeenCalledWith(expect.stringContaining('curl'));
     });
 
@@ -265,21 +249,11 @@ describe('CurlBaseInstaller', () => {
       );
 
       expect(mockReject).toHaveBeenCalledWith('Installation cancelled by user');
+      expect(mockResolve).not.toHaveBeenCalled();
     });
 
     it('should report progress during installation', async () => {
-      // Mock successful curl process
-      const mockSpawn = {
-        on: jest.fn((event: string, callback: (code: number) => void) => {
-          if (event === 'close') {
-            setTimeout(() => callback(0), 100);
-          }
-        }),
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() }
-      };
-      mockChildProcess.spawn.mockReturnValue(mockSpawn);
-
+      // Mock file system operations
       mockFs.existsSync.mockReturnValue(true);
       mockFs.statSync.mockReturnValue({ size: 1024 });
       mockFs.readdirSync.mockReturnValue(['test-curl-tool']);
@@ -294,8 +268,8 @@ describe('CurlBaseInstaller', () => {
         mockToken
       );
 
-      // Wait for async operations
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for setTimeout resolve
+      await new Promise(resolve => setTimeout(resolve, 2100));
 
       // Verify progress was reported multiple times
       expect(mockProgress.report).toHaveBeenCalledWith(

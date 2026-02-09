@@ -201,7 +201,9 @@ describe('BaseInstaller', () => {
 
     it('should return false for non-existent file', () => {
       const tempFile = '/tmp/non-existent.zip';
-      mockFs.existsSync.mockReturnValue(false);
+      mockFs.statSync.mockImplementation(() => {
+        throw new Error('ENOENT: no such file or directory');
+      });
 
       const rejectFn = jest.fn();
       const isValid = installer.testValidateDownloadedFile(tempFile, rejectFn);
@@ -226,8 +228,10 @@ describe('BaseInstaller', () => {
   describe('listAllFiles', () => {
     it('should list files in directory', () => {
       const testDir = '/test/dir';
-      mockFs.readdirSync.mockReturnValue(['file1.txt', 'file2.txt'] as any);
-      mockFs.statSync.mockReturnValue({ isDirectory: () => false } as fs.Stats);
+      mockFs.readdirSync.mockReturnValue([
+        { name: 'file1.txt', isDirectory: () => false },
+        { name: 'file2.txt', isDirectory: () => false }
+      ] as any);
 
       const files = installer.testListAllFiles(testDir);
       

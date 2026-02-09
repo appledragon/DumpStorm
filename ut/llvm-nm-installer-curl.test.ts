@@ -84,6 +84,7 @@ jest.mock('fs', () => ({
   existsSync: jest.fn(),
   mkdirSync: jest.fn(),
   chmodSync: jest.fn(),
+  copyFileSync: jest.fn(),
   createWriteStream: jest.fn(() => ({
     write: jest.fn(),
     end: jest.fn(),
@@ -127,10 +128,18 @@ describe('LLVM-NM Curl Installer', () => {
     // Reset all mocks
     jest.clearAllMocks();
     
-    // Setup default mock implementations
-    mockFs.existsSync.mockReturnValue(false); // Tool not installed initially
+    // Track created directories to simulate real filesystem behavior
+    const createdDirs = new Set<string>();
+    mockFs.existsSync.mockImplementation((p: string) => createdDirs.has(p));
+    mockFs.mkdirSync.mockImplementation((p: string) => { createdDirs.add(p); });
     mockFs.statSync.mockReturnValue({ size: 1024 }); // Valid file size
-    mockFs.readdirSync.mockReturnValue(['llvm-nm']);
+    const llvmNmBinary = os.platform() === 'win32' ? 'llvm-nm.exe' : 'llvm-nm';
+    mockFs.readdirSync.mockImplementation((_dir: string, options?: any) => {
+      if (options?.withFileTypes) {
+        return [{ name: llvmNmBinary, isFile: () => true, isDirectory: () => false }];
+      }
+      return [llvmNmBinary];
+    });
   });
 
   describe('installLlvmNmWithCurl', () => {
@@ -211,8 +220,8 @@ describe('LLVM-NM Curl Installer', () => {
       // Run the installation
       await installLlvmNmWithCurl();
 
-      // Verify success message was shown (should be called twice: initial confirmation and final success)
-      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(2);
+      // Verify success message was shown (called 3 times: user confirmation, starting installation, final success)
+      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(3);
       expect(mockVscode.window.showInformationMessage).toHaveBeenLastCalledWith(
         'llvm-nm installed successfully!',
         { modal: true },
@@ -270,13 +279,13 @@ describe('LLVM-NM Curl Installer', () => {
       const getLlvmNmDownloadUrl = require('../src/config/config').getLlvmNmDownloadUrl;
       
       const linuxUrl = getLlvmNmDownloadUrl('linux', 'x64');
-      expect(linuxUrl).toContain('linux-x64');
+      expect(linuxUrl).toContain('linux-x86_64');
       
       const windowsUrl = getLlvmNmDownloadUrl('win32', 'x64');
-      expect(windowsUrl).toContain('win32-x64');
+      expect(windowsUrl).toContain('windows-x64');
       
       const macUrl = getLlvmNmDownloadUrl('darwin', 'x64');
-      expect(macUrl).toContain('darwin-x64');
+      expect(macUrl).toContain('macos-x86_64');
     });
   });
 

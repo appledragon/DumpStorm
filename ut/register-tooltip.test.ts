@@ -2,6 +2,49 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { RegisterTooltipProvider } from '../src/analysis/registers';
 
+// Helper: create a mock text document from content
+function createMockDocument(content: string): vscode.TextDocument {
+    const lines = content.split('\n');
+    return {
+        getText: (range?: any) => {
+            if (!range) { return content; }
+            return lines[range.start.line].substring(range.start.character, range.end.character);
+        },
+        lineAt: (line: number) => ({ text: lines[line], range: new vscode.Range(new vscode.Position(line, 0), new vscode.Position(line, lines[line].length)) }),
+        getWordRangeAtPosition: (position: vscode.Position) => {
+            const line = lines[position.line] || '';
+            // Find the word boundary around the position
+            const wordPattern = /[a-zA-Z_]\w*/g;
+            let match;
+            while ((match = wordPattern.exec(line)) !== null) {
+                const start = match.index;
+                const end = start + match[0].length;
+                if (position.character >= start && position.character < end) {
+                    return new vscode.Range(
+                        new vscode.Position(position.line, start),
+                        new vscode.Position(position.line, end)
+                    );
+                }
+            }
+            return undefined;
+        },
+        uri: vscode.Uri.file('test.txt'),
+        fileName: 'test.txt',
+        isUntitled: true,
+        languageId: 'plaintext',
+        version: 1,
+        isDirty: false,
+        isClosed: false,
+        eol: 1,
+        lineCount: lines.length,
+        save: () => Promise.resolve(true),
+        offsetAt: () => 0,
+        positionAt: () => new vscode.Position(0, 0),
+        validateRange: (r: any) => r,
+        validatePosition: (p: any) => p,
+    } as any;
+}
+
 describe('RegisterTooltipProvider', () => {
     let provider: RegisterTooltipProvider;
     const cancelToken: vscode.CancellationToken = {
@@ -14,13 +57,10 @@ describe('RegisterTooltipProvider', () => {
     });
 
     describe('ARM64 Register Support', () => {
-        it('should recognize x0-x28 registers', async () => {
+        it('should recognize x0-x28 registers', () => {
             // Create a mock document with ARM64 register content
             const content = 'CPU Context:\nx0 = 0x0000000100000000\nx15 = 0x0000000200000000\nx28 = 0x0000000300000000';
-            const document = await vscode.workspace.openTextDocument({
-                content: content,
-                language: 'plaintext'
-            });
+            const document = createMockDocument(content);
 
             // Test x0 register
             const position0 = new vscode.Position(1, 0);
@@ -38,13 +78,10 @@ describe('RegisterTooltipProvider', () => {
             assert.notStrictEqual(hover28, undefined, 'Should provide hover for x28 register');
         });
 
-        it('should recognize w0-w28 registers (32-bit ARM64)', async () => {
+        it('should recognize w0-w28 registers (32-bit ARM64)', () => {
             // Create a mock document with ARM64 32-bit register content
             const content = 'CPU Context:\nw0 = 0x12345678\nw15 = 0x87654321\nw28 = 0xABCDEF00';
-            const document = await vscode.workspace.openTextDocument({
-                content: content,
-                language: 'plaintext'
-            });
+            const document = createMockDocument(content);
 
             // Test w0 register
             const position0 = new vscode.Position(1, 0);
@@ -62,13 +99,10 @@ describe('RegisterTooltipProvider', () => {
             assert.notStrictEqual(hover28, undefined, 'Should provide hover for w28 register');
         });
 
-        it('should handle mixed ARM64 and x86/x64 registers', async () => {
+        it('should handle mixed ARM64 and x86/x64 registers', () => {
             // Create a mock document with mixed architecture registers
             const content = 'CPU Context:\neax = 0x12345678\nx0 = 0x0000000100000000\nrax = 0x0000000200000000\nw5 = 0x87654321';
-            const document = await vscode.workspace.openTextDocument({
-                content: content,
-                language: 'plaintext'
-            });
+            const document = createMockDocument(content);
 
             // Test each register type
             const positionEax = new vscode.Position(1, 0);
@@ -90,7 +124,7 @@ describe('RegisterTooltipProvider', () => {
     });
 
     describe('Register Context Detection', () => {
-        it('should detect ARM64 registers in different contexts', async () => {
+        it('should detect ARM64 registers in different contexts', () => {
             const contexts = [
                 'Thread 0 crashed with ARM Thread State (64-bit):\nx0: 0x0000000100000000',
                 'CPU Context:\n  x15 = 0x0000000200000000',
@@ -98,10 +132,7 @@ describe('RegisterTooltipProvider', () => {
             ];
 
             for (const context of contexts) {
-                const document = await vscode.workspace.openTextDocument({
-                    content: context,
-                    language: 'plaintext'
-                });
+                const document = createMockDocument(context);
 
                 // Find position of x register in content
                 const lines = context.split('\n');
