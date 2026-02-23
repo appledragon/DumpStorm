@@ -198,5 +198,97 @@ Thread 1
       expect(result).not.toContain('DEBUG:');
       expect(result).not.toContain('Loading debug symbols');
     });
+
+    it('should keep CPU detail continuation lines', () => {
+      const stdout = `Operating system: Windows NT 10.0.19041
+CPU: amd64
+     family 6 model 142 stepping 12
+     8 CPUs
+
+Crash reason:  EXCEPTION_ACCESS_VIOLATION_READ
+Crash address: 0x0000000000000000
+Process uptime: 42 seconds
+
+Thread 0 (crashed)
+ 0  app.exe!CrashFunction + 0x15
+ 1  app.exe!main + 0x120`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).toContain('family 6 model 142 stepping 12');
+      expect(result).toContain('CPU: amd64');
+    });
+  });
+
+  describe('loaded modules preservation', () => {
+    it('should keep Loaded modules section', () => {
+      const stdout = `Operating system: Linux
+CPU: amd64
+Process uptime: 5 seconds
+
+Loaded modules:
+0x616c306000 - 0x616c307fff  app_process64  ???
+0x7f8a100000 - 0x7f8a1fffff  libtest.so  ???
+
+Thread 0 (crashed)
+ 0  app_process64 + 0x1234
+ 1  libtest.so + 0x5678`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).toContain('Loaded modules:');
+      expect(result).toContain('0x616c306000');
+      expect(result).toContain('app_process64');
+    });
+
+    it('should filter Loaded symbols lines but keep Loaded modules', () => {
+      const stdout = `Loaded symbols for ntdll.dll
+Loaded modules:
+0x400000 - 0x4fffff  app  ???
+
+Thread 0 (crashed)
+ 0  app + 0x1234
+ 1  ntdll.dll + 0x5678
+ 2  kernel32.dll + 0x9abc`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).not.toContain('Loaded symbols for ntdll.dll');
+      expect(result).toContain('Loaded modules:');
+    });
+  });
+
+  describe('source file and register preservation', () => {
+    it('should keep source file references', () => {
+      const stdout = `Thread 0 (crashed)
+ 0  app.exe!CrashFunction + 0x15
+    main.cpp:42
+ 1  app.exe!main + 0x120
+    app.cpp:100`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).toContain('main.cpp:42');
+      expect(result).toContain('app.cpp:100');
+    });
+
+    it('should keep Found by lines', () => {
+      const stdout = `Thread 0 (crashed)
+ 0  app.exe!CrashFunction + 0x15
+    Found by: given as instruction pointer in context
+ 1  app.exe!main + 0x120
+    Found by: stack scanning`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).toContain('Found by: given as instruction pointer in context');
+      expect(result).toContain('Found by: stack scanning');
+    });
+
+    it('should keep register value lines', () => {
+      const stdout = `Thread 0 (crashed)
+ 0  app.exe!CrashFunction + 0x15
+    eax = 0x00000000  ebx = 0x12345678
+    ecx = 0xdeadbeef  edx = 0x00000001`;
+
+      const result = cleanStackwalkOutput(stdout, '');
+      expect(result).toContain('eax = 0x00000000');
+      expect(result).toContain('ecx = 0xdeadbeef');
+    });
   });
 });

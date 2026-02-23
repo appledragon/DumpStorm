@@ -72,6 +72,12 @@ Thread 0 (crashed)
     it('should handle names without extension', () => {
       expect(getLibraryBaseName('dyld')).toBe('dyld');
     });
+
+    it('should handle versioned .so files', () => {
+      expect(getLibraryBaseName('libfoo.so.1')).toBe('libfoo');
+      expect(getLibraryBaseName('libfoo.so.1.2.3')).toBe('libfoo');
+      expect(getLibraryBaseName('/usr/lib/libssl.so.1.1')).toBe('libssl');
+    });
   });
 
   describe('loadSymbolTable', () => {

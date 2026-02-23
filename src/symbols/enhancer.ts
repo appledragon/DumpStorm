@@ -71,14 +71,16 @@ const symbolTableCache = new SymbolTableCache();
 // Helper function to get library base name without extension
 function getLibraryBaseName(libName: string): string {
     // Handle different dynamic library extensions across platforms
-    const extensions = ['.so', '.dylib', '.dll'];
+    // Also handles versioned .so files like libfoo.so.1.2.3
     let baseName = libName;
     
-    for (const ext of extensions) {
-        if (libName.endsWith(ext)) {
-            baseName = libName.slice(0, -ext.length);
-            break;
-        }
+    const soMatch = libName.match(/^(.+)\.so(\.\d+)*$/);
+    if (soMatch) {
+        baseName = soMatch[1];
+    } else if (libName.endsWith('.dylib')) {
+        baseName = libName.slice(0, -'.dylib'.length);
+    } else if (libName.endsWith('.dll')) {
+        baseName = libName.slice(0, -'.dll'.length);
     }
     
     return path.basename(baseName);
@@ -98,9 +100,14 @@ export function parseModuleBaseAddresses(stackTraceOutput: string): Map<string, 
             continue;
         }
         
-        // Exit if we hit another section or empty line after loaded modules
-        if (inLoadedModulesSection && (trimmedLine === '' || trimmedLine.startsWith('Thread'))) {
+        // Exit if we hit another major section after loaded modules
+        if (inLoadedModulesSection && (trimmedLine.startsWith('Thread') || trimmedLine.startsWith('Crash'))) {
             break;
+        }
+        
+        // Skip empty lines within loaded modules section
+        if (inLoadedModulesSection && trimmedLine === '') {
+            continue;
         }
         
         // Parse module lines in the format: 

@@ -137,6 +137,7 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
     const cleanLines: string[] = [];
     let inCrashSection = false;
     let foundMainInfo = false;
+    let previousLineWasHeader = false;
     
     // Filter out debug/informational lines and keep relevant crash data
     for (const line of lines) {
@@ -147,14 +148,15 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
             if (foundMainInfo) {
                 cleanLines.push('');
             }
+            previousLineWasHeader = false;
             continue;
         }
         
-        // Skip debug/loading messages
+        // Skip debug/loading messages (but keep 'Loaded modules:' section header)
         if (trimmedLine.startsWith('INFO') || 
             trimmedLine.startsWith('DEBUG') ||
             trimmedLine.startsWith('Loading') ||
-            trimmedLine.startsWith('Loaded') ||
+            (trimmedLine.startsWith('Loaded') && !trimmedLine.startsWith('Loaded modules')) ||
             trimmedLine.includes('symbol file') ||
             trimmedLine.includes('Found debug info')) {
             continue;
@@ -164,26 +166,44 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
         if (trimmedLine.startsWith('Crash') ||
             trimmedLine.startsWith('Operating system:') ||
             trimmedLine.startsWith('CPU:') ||
+            trimmedLine.startsWith('GPU:') ||
             trimmedLine.startsWith('Process uptime:') ||
+            trimmedLine.startsWith('Assertion:') ||
             trimmedLine.startsWith('Thread') ||
+            trimmedLine.startsWith('Loaded modules:') ||
+            trimmedLine.startsWith('Found by:') ||
             trimmedLine.includes('crashed') ||
-            trimmedLine.match(/^\d+\s+/)) { // Stack frame lines typically start with frame number
+            trimmedLine.match(/^\d+\s+\S+/)) { // Stack frame lines: frame number followed by module/address
             foundMainInfo = true;
             cleanLines.push(line);
+            
+            previousLineWasHeader = (
+                trimmedLine.startsWith('CPU:') ||
+                trimmedLine.startsWith('GPU:') ||
+                trimmedLine.startsWith('Loaded modules:')
+            );
             
             if (trimmedLine.startsWith('Thread') && trimmedLine.includes('crashed')) {
                 inCrashSection = true;
             }
+        }
+        // Keep continuation/detail lines (indented lines following CPU:, GPU:, etc.)
+        else if (previousLineWasHeader && line.startsWith(' ')) {
+            cleanLines.push(line);
         } else if (inCrashSection || foundMainInfo) {
-            // In crash section, keep all lines that look like stack frames or module info
+            previousLineWasHeader = false;
+            // Keep lines that look like stack frames, module info, or other useful data
             if (trimmedLine.match(/^\d+/) ||  // Frame numbers
-                trimmedLine.includes('!') ||  // Module symbols
+                trimmedLine.includes('!') ||  // Module!symbol notation
                 trimmedLine.includes('0x') || // Addresses
                 trimmedLine.startsWith('Module') ||
-                trimmedLine.includes('libr') ||  // Library names
+                trimmedLine.startsWith('Found by:') ||
+                trimmedLine.match(/=\s*0x/) ||  // Register values (eax = 0x...)
+                trimmedLine.match(/\.(cpp|c|cc|cxx|h|hpp|rs|go|swift|java|cs|mm|m):\d+/) || // Source file refs
                 trimmedLine.includes('.so') ||  // Shared libraries
                 trimmedLine.includes('.dll') || // Windows DLLs
-                trimmedLine.includes('.dylib')) {  // macOS dynamic libraries
+                trimmedLine.includes('.dylib') || // macOS dynamic libraries
+                trimmedLine.match(/^0x[0-9a-fA-F]+\s+-\s+0x[0-9a-fA-F]+/)) {  // Module address ranges
                 cleanLines.push(line);
             }
         }
