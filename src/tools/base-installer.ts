@@ -5,9 +5,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { execSync } from 'child_process';
 import { localization } from '../localization/localization';
-
-const { execSync } = require('child_process');
 
 export interface ToolConfig {
     INSTALL_PATHS: {

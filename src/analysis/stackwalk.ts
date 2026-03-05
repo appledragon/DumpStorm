@@ -73,9 +73,13 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
     const exe = await getBinaryPath(context);
     
     try {
-        // Ensure binary is executable (only needed for local binaries)
-        if (!exe.includes(MINIDUMP_STACKWALK_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN)) {
-            fs.chmodSync(exe, 0o755);
+        // Ensure binary is executable on Unix systems (skip for auto-installed dumpstorm binaries which are already set)
+        if (os.platform() !== 'win32' && !exe.includes(MINIDUMP_STACKWALK_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN)) {
+            try {
+                fs.accessSync(exe, fs.constants.X_OK);
+            } catch {
+                fs.chmodSync(exe, 0o755);
+            }
         }
     } catch (error) {
         throw new Error(`Failed to make binary executable: ${error}`);

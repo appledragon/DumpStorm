@@ -115,7 +115,12 @@ describe('Config Module', () => {
 
   describe('DEFAULT_CONFIG', () => {
     it('should have expected defaults', () => {
-      expect(DEFAULT_CONFIG.SYMBOL_PATH).toBe('/tmp/symbols');
+      const os = require('os');
+      const path = require('path');
+      const expectedSymbolPath = os.platform() === 'win32'
+        ? path.join(os.homedir(), '.dumpstorm', 'symbols')
+        : '/tmp/symbols';
+      expect(DEFAULT_CONFIG.SYMBOL_PATH).toBe(expectedSymbolPath);
       expect(DEFAULT_CONFIG.HOME_SYMBOL_PATH).toBe('symbols');
     });
   });

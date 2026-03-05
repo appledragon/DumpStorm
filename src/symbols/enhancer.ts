@@ -1,28 +1,59 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 
-// Symbol table cache for performance optimization
+// Shared output channel for extension logging
+let _outputChannel: vscode.OutputChannel | undefined;
+function getOutputChannel(): vscode.OutputChannel {
+    if (!_outputChannel) {
+        _outputChannel = vscode.window.createOutputChannel('DumpStorm');
+    }
+    return _outputChannel;
+}
+function log(message: string): void {
+    getOutputChannel().appendLine(message);
+}
+
+// Sorted symbol entry for efficient binary search
+interface SortedSymbolEntry {
+    address: number;
+    name: string;
+}
+
+// Symbol table cache with LRU eviction and pre-sorted arrays
 class SymbolTableCache {
-    private cache = new Map<string, Map<number, string>>();
+    private cache = new Map<string, { table: Map<number, string>; sorted: SortedSymbolEntry[] }>();
+    private accessOrder: string[] = []; // tracks LRU order
     private maxCacheSize = 50;
     
     async get(filePath: string): Promise<Map<number, string> | null> {
         if (this.cache.has(filePath)) {
-            return this.cache.get(filePath)!;
+            // Move to end of access order (most recently used)
+            this.accessOrder = this.accessOrder.filter(k => k !== filePath);
+            this.accessOrder.push(filePath);
+            return this.cache.get(filePath)!.table;
         }
         
         const symbolTable = await this.loadSymbolTable(filePath);
         if (symbolTable) {
-            // Add to cache with size limit
-            if (this.cache.size >= this.maxCacheSize) {
-                const firstKey = this.cache.keys().next().value;
-                if (firstKey) {
-                    this.cache.delete(firstKey);
-                }
+            // Evict LRU entry if at capacity
+            if (this.cache.size >= this.maxCacheSize && this.accessOrder.length > 0) {
+                const lruKey = this.accessOrder.shift()!;
+                this.cache.delete(lruKey);
             }
-            this.cache.set(filePath, symbolTable);
+            // Pre-sort entries for binary search
+            const sorted = Array.from(symbolTable.entries())
+                .sort((a, b) => a[0] - b[0])
+                .map(([address, name]) => ({ address, name }));
+            this.cache.set(filePath, { table: symbolTable, sorted });
+            this.accessOrder.push(filePath);
         }
         return symbolTable;
+    }
+
+    getSorted(filePath: string): SortedSymbolEntry[] | null {
+        const entry = this.cache.get(filePath);
+        return entry ? entry.sorted : null;
     }
     
     private async loadSymbolTable(nmFilePath: string): Promise<Map<number, string> | null> {
@@ -30,7 +61,7 @@ class SymbolTableCache {
             const content = await fs.promises.readFile(nmFilePath, 'utf8');
             return this.parseSymbolTable(content);
         } catch (error) {
-            console.error(`Error loading symbol table from ${nmFilePath}:`, error);
+            log(`Error loading symbol table from ${nmFilePath}: ${error}`);
             return null;
         }
     }
@@ -58,6 +89,7 @@ class SymbolTableCache {
     
     clear(): void {
         this.cache.clear();
+        this.accessOrder = [];
     }
     
     getSize(): number {
@@ -125,7 +157,7 @@ export function parseModuleBaseAddresses(stackTraceOutput: string): Map<string, 
                     moduleBaseAddresses.set(baseName, baseAddress);
                 }
                 
-                console.log(`Parsed module base address: ${moduleName} -> 0x${baseAddress.toString(16)}`);
+                log(`Parsed module base address: ${moduleName} -> 0x${baseAddress.toString(16)}`);
             }
         }
     }
@@ -144,14 +176,15 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
         return stackTraceOutput; // No nm files found
     }
     
-    console.log(`Found ${nmFiles.length} nm symbol files for enhancement`);
+    log(`Found ${nmFiles.length} nm symbol files for enhancement`);
     
     // Parse module base addresses from the stack trace output
     const moduleBaseAddresses = parseModuleBaseAddresses(stackTraceOutput);
-    console.log(`Parsed ${moduleBaseAddresses.size} module base addresses`);
+    log(`Parsed ${moduleBaseAddresses.size} module base addresses`);
     
     // Load all symbol tables using cache
     const symbolTables = new Map<string, Map<number, string>>();
+    const sortedTables = new Map<string, SortedSymbolEntry[]>();
     
     for (const nmFile of nmFiles) {
         const libName = nmFile.replace('_nm.txt', '');
@@ -159,7 +192,11 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
         const symbolTable = await symbolTableCache.get(nmFilePath);
         if (symbolTable) {
             symbolTables.set(libName, symbolTable);
-            console.log(`Loaded ${symbolTable.size} symbols for ${libName}`);
+            const sorted = symbolTableCache.getSorted(nmFilePath);
+            if (sorted) {
+                sortedTables.set(libName, sorted);
+            }
+            log(`Loaded ${symbolTable.size} symbols for ${libName}`);
         }
     }
     
@@ -181,58 +218,21 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
             const symbolTable = symbolTables.get(baseLibName) || symbolTables.get(libName);
             
             if (symbolTable) {
-                console.log(`Looking up ${libName}+0x${offsetStr} (offset=${offset}) in symbol table with ${symbolTable.size} symbols`);
+                log(`Looking up ${libName}+0x${offsetStr} (offset=${offset}) in symbol table with ${symbolTable.size} symbols`);
                 
                 // For offset notation, the address is already relative to the module base
                 // So we search directly with the offset value (no base address subtraction needed)
-                const symbolName = findNearestSymbol(symbolTable, offset, undefined, true);
+                const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                const symbolName = findNearestSymbolSorted(sorted || null, offset, undefined, true);
                 if (symbolName) {
                     enhancedLine += `  <-- ${symbolName}`;
-                    console.log(`Enhanced ${libName}+0x${offsetStr} -> ${symbolName} (offset mode)`);
+                    log(`Enhanced ${libName}+0x${offsetStr} -> ${symbolName} (offset mode)`);
                 } else {
-                    console.log(`No symbol found for ${libName}+0x${offsetStr} (offset=0x${offset.toString(16)})`);
-                    
-                    // Additional debugging: show nearby symbols
-                    const sortedAddresses = Array.from(symbolTable.entries())
-                        .sort((a, b) => a[0] - b[0]);
-                    
-                    const nearbySymbols = sortedAddresses.filter(([addr, _]) => 
-                        Math.abs(addr - offset) <= 0x1000
-                    );
-                    
-                    if (nearbySymbols.length > 0) {
-                        console.log(`Nearby symbols within 0x1000 bytes:`);
-                        nearbySymbols.forEach(([addr, sym]) => {
-                            const distance = Math.abs(addr - offset);
-                            console.log(`  0x${addr.toString(16)} (distance: 0x${distance.toString(16)}): ${sym}`);
-                        });
-                    } else {
-                        console.log(`No symbols found within 0x1000 bytes of 0x${offset.toString(16)}`);
-                        // Show the closest symbols on either side
-                        let beforeSymbol = null;
-                        let afterSymbol = null;
-                        
-                        for (let i = 0; i < sortedAddresses.length; i++) {
-                            const [addr, sym] = sortedAddresses[i];
-                            if (addr <= offset) {
-                                beforeSymbol = { addr, sym, distance: offset - addr };
-                            } else {
-                                afterSymbol = { addr, sym, distance: addr - offset };
-                                break;
-                            }
-                        }
-                        
-                        if (beforeSymbol) {
-                            console.log(`  Closest symbol before: 0x${beforeSymbol.addr.toString(16)} (distance: 0x${beforeSymbol.distance.toString(16)}): ${beforeSymbol.sym}`);
-                        }
-                        if (afterSymbol) {
-                            console.log(`  Closest symbol after: 0x${afterSymbol.addr.toString(16)} (distance: 0x${afterSymbol.distance.toString(16)}): ${afterSymbol.sym}`);
-                        }
-                    }
+                    log(`No symbol found for ${libName}+0x${offsetStr} (offset=0x${offset.toString(16)})`);
                 }
             } else {
-                console.log(`No symbol table found for ${libName} (base name: ${baseLibName})`);
-                console.log(`Available symbol tables: ${Array.from(symbolTables.keys()).join(', ')}`);
+                log(`No symbol table found for ${libName} (base name: ${baseLibName})`);
+                log(`Available symbol tables: ${Array.from(symbolTables.keys()).join(', ')}`);
             }
         }
         // Look for stack frame patterns with absolute addresses
@@ -249,10 +249,11 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
                 if (symbolTable) {
                     // Get the base address for this module
                     const baseAddress = moduleBaseAddresses.get(baseLibName) || moduleBaseAddresses.get(libName);
-                    const symbolName = findNearestSymbol(symbolTable, address, baseAddress, false);
+                    const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                    const symbolName = findNearestSymbolSorted(sorted || null, address, baseAddress, false);
                     if (symbolName) {
                         enhancedLine += `  <-- ${symbolName}`;
-                        console.log(`Enhanced ${libName}+0x${addressStr} -> ${symbolName} (absolute mode, base: 0x${baseAddress?.toString(16)})`);
+                        log(`Enhanced ${libName}+0x${addressStr} -> ${symbolName} (absolute mode, base: 0x${baseAddress?.toString(16)})`);
                     }
                 }
             }
@@ -268,10 +269,11 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
                 
                 if (symbolTable) {
                     const baseAddress = moduleBaseAddresses.get(baseLibName) || moduleBaseAddresses.get(libName);
-                    const symbolName = findNearestSymbol(symbolTable, address, baseAddress, false);
+                    const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                    const symbolName = findNearestSymbolSorted(sorted || null, address, baseAddress, false);
                     if (symbolName) {
                         enhancedLine += `  <-- ${symbolName}`;
-                        console.log(`Enhanced ${libName}!0x${addressStr} -> ${symbolName} (direct mode)`);
+                        log(`Enhanced ${libName}!0x${addressStr} -> ${symbolName} (direct mode)`);
                     }
                 }
             }
@@ -326,43 +328,24 @@ export function loadSymbolTable(nmFilePath: string): Map<number, string> {
             }
         }
     } catch (error) {
-        console.log(`Error loading symbol table from ${nmFilePath}: ${error}`);
+        log(`Error loading symbol table from ${nmFilePath}: ${error}`);
     }
     
     return symbolTable;
 }
 
-export function findNearestSymbol(symbolTable: Map<number, string>, targetAddress: number, baseAddress?: number, isOffset: boolean = false): string | null {
-    // Smart address resolution:
-    // - If isOffset is true, the address is already a relative offset, use it directly
-    // - If isOffset is false and we have a base address, subtract it from the target
-    // - If no base address is available, try both absolute and relative matching
-    
-    let searchAddress = targetAddress;
-    let debugInfo = '';
-    
-    if (isOffset) {
-        // Address is already an offset, use directly
-        searchAddress = targetAddress;
-        debugInfo = `offset mode: 0x${targetAddress.toString(16)}`;
-    } else if (baseAddress !== undefined) {
-        // Calculate relative address within the module
-        searchAddress = targetAddress - baseAddress;
-        debugInfo = `absolute mode: runtime=0x${targetAddress.toString(16)}, base=0x${baseAddress.toString(16)}, relative=0x${searchAddress.toString(16)}`;
-    } else {
-        // No base address available, try direct matching first
-        searchAddress = targetAddress;
-        debugInfo = `direct mode: 0x${targetAddress.toString(16)} (no base address)`;
+// Internal implementation using pre-sorted array (used by enhanceStackTraceWithSymbols)
+function findNearestSymbolSorted(sortedAddresses: SortedSymbolEntry[] | null, targetAddress: number, baseAddress?: number, isOffset: boolean = false): string | null {
+    if (!sortedAddresses || sortedAddresses.length === 0) {
+        return null;
     }
     
-    console.log(`Finding symbol: ${debugInfo}`);
+    let searchAddress = targetAddress;
     
-    // For efficiency, convert the Map entries to a sorted array once
-    const sortedAddresses = Array.from(symbolTable.entries())
-        .sort((a, b) => a[0] - b[0]);
-    
-    if (sortedAddresses.length === 0) {
-        return null;
+    if (isOffset) {
+        searchAddress = targetAddress;
+    } else if (baseAddress !== undefined) {
+        searchAddress = targetAddress - baseAddress;
     }
     
     // Binary search for the largest address <= searchAddress
@@ -372,9 +355,7 @@ export function findNearestSymbol(symbolTable: Map<number, string>, targetAddres
     
     while (left <= right) {
         const mid = Math.floor((left + right) / 2);
-        const [address, ] = sortedAddresses[mid];
-        
-        if (address <= searchAddress) {
+        if (sortedAddresses[mid].address <= searchAddress) {
             nearestIndex = mid;
             left = mid + 1;
         } else {
@@ -383,48 +364,34 @@ export function findNearestSymbol(symbolTable: Map<number, string>, targetAddres
     }
     
     if (nearestIndex === -1) {
-        // No symbol found at or before the target address
         return null;
     }
     
-    const [nearestAddress, nearestSymbol] = sortedAddresses[nearestIndex];
-    
-    // Calculate offset from the nearest symbol
-    const offset = searchAddress - nearestAddress;
+    const nearest = sortedAddresses[nearestIndex];
+    const offset = searchAddress - nearest.address;
     
     // Don't show symbols that are too far away (likely wrong match)
     if (offset > 0x10000) { // 64KB threshold
-        console.log(`Symbol too far: offset=0x${offset.toString(16)} > 0x10000, rejecting`);
-        
-        // Try with a more relaxed threshold for debugging
         if (offset <= 0x50000) { // 320KB relaxed threshold
-            console.log(`Using relaxed threshold: ${nearestSymbol}+0x${offset.toString(16)} (distance warning)`);
-            return `${nearestSymbol}+0x${offset.toString(16)} [far]`;
+            return `${nearest.name}+0x${offset.toString(16)} [far]`;
         }
-        
         return null;
     }
     
-    // Enhanced debugging: show symbol lookup details
-    console.log(`Symbol found: ${nearestSymbol} at 0x${nearestAddress.toString(16)}, offset=0x${offset.toString(16)}`);
-    
-    // Check if there are multiple symbols at nearby addresses (common for inlined functions)
-    const nearbySymbols = sortedAddresses.filter(([addr, _]) => 
-        Math.abs(addr - nearestAddress) <= 0x100
-    );
-    
-    if (nearbySymbols.length > 1) {
-        console.log(`Multiple nearby symbols found (within 0x100 bytes):`);
-        nearbySymbols.forEach(([addr, sym]) => {
-            console.log(`  0x${addr.toString(16)}: ${sym}`);
-        });
-    }
-    
     if (offset === 0) {
-        return nearestSymbol;
+        return nearest.name;
     } else {
-        return `${nearestSymbol}+0x${offset.toString(16)}`;
+        return `${nearest.name}+0x${offset.toString(16)}`;
     }
+}
+
+export function findNearestSymbol(symbolTable: Map<number, string>, targetAddress: number, baseAddress?: number, isOffset: boolean = false): string | null {
+    // Build sorted array on-the-fly for backward compatibility
+    const sortedAddresses = Array.from(symbolTable.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([address, name]) => ({ address, name }));
+    
+    return findNearestSymbolSorted(sortedAddresses, targetAddress, baseAddress, isOffset);
 }
 
 // Export test helpers for unit testing

@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG, isValidLlvmNmPath, isValidMinidumpStackwalkPath, isVali
 import { localization } from './localization/localization';
 import { enhanceStackTraceWithSymbols } from './symbols/enhancer';
 import { extractSymbolsFromBinary, extractSymbolsFromDirectory } from './symbols/extractor';
+import { clearSymbolCache } from './symbols/enhancer';
 import { installLlvmNmWithCurl } from './tools/llvm-nm-installer-curl';
 import { BreakpadPanelProvider } from './ui/panel';
 
@@ -619,8 +620,9 @@ Stack trace:
         switchLanguageCommand,
         testRegisterTooltipCommand,
         vscode.commands.registerCommand('minidump-parser.about', () => {
+            const version = context.extension.packageJSON.version || 'unknown';
             vscode.window.showInformationMessage(
-                'Minidump Parser\n\nVersion: 1.0.1\nAuthor: AppleDragon\n\nGitHub: https://github.com/appledragon/DumpStorm',
+                `Minidump Parser\n\nVersion: ${version}\nAuthor: AppleDragon\n\nGitHub: https://github.com/appledragon/DumpStorm`,
                 'GitHub', 'Close'
             ).then(choice => {
                 if (choice === 'GitHub') {
@@ -631,4 +633,6 @@ Stack trace:
     );
 }
 
-export function deactivate() {}
+export function deactivate() {
+    clearSymbolCache();
+}

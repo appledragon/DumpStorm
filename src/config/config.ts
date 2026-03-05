@@ -1,4 +1,5 @@
 // Configuration constants for Minidump Parser extension
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -110,60 +111,20 @@ export function getLlvmNmBinaryName(platform: string): string {
 
 // Helper function to check if nm command is available
 export function isNmAvailable(): boolean {
-    // First check if user has specified a custom llvm-nm path
-    const customLlvmNmPath = getCustomLlvmNmPath();
-    if (customLlvmNmPath && isValidLlvmNmPath(customLlvmNmPath)) {
-        return true;
-    }
-    
-    // Then check if user has specified a custom nm path
-    const customNmPath = getCustomNmPath();
-    if (customNmPath && isValidNmPath(customNmPath)) {
-        return true;
-    }
-    
-    // Check if auto-installed llvm-nm exists in ~/.dumpstorm/bin
-    try {
-        const platform = os.platform();
-        const binaryName = getLlvmNmBinaryName(platform);
-        const autoInstalledPath = path.join(os.homedir(), LLVM_NM_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN, binaryName);
-        if (fs.existsSync(autoInstalledPath)) {
-            return true;
-        }
-    } catch (error) {
-        // Continue to check system paths
-    }
-    
-    try {
-        const { execSync } = require('child_process');
-        const platform = os.platform();
-        const whichCommand = platform === 'win32' ? 'where' : 'which';
-        
-        // Try regular nm first
-        try {
-            const nmResult = execSync(`${whichCommand} nm`, { encoding: 'utf8' }).trim();
-            if (nmResult && nmResult.length > 0) {
-                return true;
-            }
-        } catch (error) {
-            // nm not found, continue to try llvm-nm
-        }
-        
-        // Try llvm-nm if nm is not available
-        try {
-            const llvmNmResult = execSync(`${whichCommand} llvm-nm`, { encoding: 'utf8' }).trim();
-            return llvmNmResult && llvmNmResult.length > 0;
-        } catch (error) {
-            // llvm-nm not found either
-            return false;
-        }
-    } catch (error) {
-        return false;
-    }
+    return findNmBinaryPath() !== null;
 }
 
 // Helper function to get the preferred nm command
 export function getNmCommand(): string {
+    const nmPath = findNmBinaryPath();
+    if (nmPath) {
+        return nmPath;
+    }
+    throw new Error('Neither nm nor llvm-nm command found');
+}
+
+// Shared logic: find the best available nm binary path
+function findNmBinaryPath(): string | null {
     // First check if user has specified a custom llvm-nm path
     const customLlvmNmPath = getCustomLlvmNmPath();
     if (customLlvmNmPath && isValidLlvmNmPath(customLlvmNmPath)) {
@@ -189,7 +150,6 @@ export function getNmCommand(): string {
     }
     
     try {
-        const { execSync } = require('child_process');
         const platform = os.platform();
         const whichCommand = platform === 'win32' ? 'where' : 'which';
         
@@ -212,16 +172,18 @@ export function getNmCommand(): string {
         } catch (error) {
             // llvm-nm not found either
         }
-        
-        throw new Error('Neither nm nor llvm-nm command found');
     } catch (error) {
-        throw new Error('Neither nm nor llvm-nm command found');
+        // Unexpected error
     }
+    
+    return null;
 }
 
 // Default configuration values
 export const DEFAULT_CONFIG = {
-    SYMBOL_PATH: '/tmp/symbols',
+    SYMBOL_PATH: os.platform() === 'win32'
+        ? path.join(os.homedir(), '.dumpstorm', 'symbols')
+        : '/tmp/symbols',
     HOME_SYMBOL_PATH: 'symbols'
 };
 

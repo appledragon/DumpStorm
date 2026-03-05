@@ -6,9 +6,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { localization } from '../localization/localization';
+import { execSync } from 'child_process';
 import { BinaryInfo, ToolConfig } from './base-installer';
-
-const { execSync } = require('child_process');
 
 /**
  * Base curl installer class with common installation logic using curl

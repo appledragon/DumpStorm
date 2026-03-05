@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -33,17 +33,15 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
             console.log(`Executing ${nmCommand} for symbol extraction:`);
             console.log(`  Input file: ${binaryPath}`);
             console.log(`  Output file: ${outputFile}`);
-            console.log(`  Command: ${nmCommand} "${binaryPath}"`);
+            console.log(`  Command: ${nmCommand} -C "${binaryPath}"`);
 
             return new Promise<void>((resolve, reject) => {
                 try {
                     // Use nm -C to get all symbols with demangled names
                     // Don't use -D by default as it only shows dynamic symbols (missing local symbols)
-                    let nmCommandLine = `${nmCommand} -C "${binaryPath}"`;
-                    
                     let nmOutput: string;
                     try {
-                        nmOutput = execSync(nmCommandLine, { 
+                        nmOutput = execFileSync(nmCommand, ['-C', binaryPath], { 
                             encoding: 'utf8',
                             maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
                         });
@@ -138,11 +136,9 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
 
                     // Use nm -C to get all symbols with demangled names
                     // Don't use -D by default as it only shows dynamic symbols (missing local symbols)
-                    let nmCommandLine = `${nmCommand} -C "${binaryPath}"`;
-                    
                     let nmOutput: string;
                     try {
-                        nmOutput = execSync(nmCommandLine, { 
+                        nmOutput = execFileSync(nmCommand, ['-C', binaryPath], { 
                             encoding: 'utf8',
                             maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
                         });

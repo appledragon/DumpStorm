@@ -59,6 +59,7 @@
     "vscode": "^1.75.0"
   },
   "categories": [
+    "Debuggers",
     "Other"
   ],
   "main": "./out/extension.js",
