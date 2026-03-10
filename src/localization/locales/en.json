@@ -422,6 +422,7 @@
     "stackOverflow": "STATUS_STACK_OVERFLOW - Stack overflow",
     "breakpoint": "STATUS_BREAKPOINT - Breakpoint exception",
     "singleStep": "STATUS_SINGLE_STEP - Single step debugging",
+    "heapCorruption": "STATUS_HEAP_CORRUPTION - Heap corruption (often caused by use-after-free or double-free)",
     "errorCode": "Error code: 0x{0}"
   },
   "crash": {
@@ -429,7 +430,9 @@
     "lowStackPointer": "Stack pointer abnormally low, possible stack overflow",
     "accessViolationReturn": "Return value 0xC0000005 indicates access violation exception",
     "unimplementedFunction": "Return value 0xC0000001 indicates unimplemented function",
-    "lowAddressValue": "Low address value, possibly wild pointer or null pointer dereference"
+    "lowAddressValue": "Low address value, possibly wild pointer or null pointer dereference",
+    "useAfterFree": "Register contains freed memory fill pattern, strongly suggests use-after-free (UAF) bug. Common patterns: 0xDDDDDDDD (MSVC CRT freed heap), 0xFEEEFEEE (Windows HeapFree), 0xDEADBEEF (freed marker)",
+    "uninitializedMemory": "Register contains uninitialized memory fill pattern. Common patterns: 0xCDCDCDCD (uninitialized heap), 0xCCCCCCCC (uninitialized stack), 0xBAADF00D (LocalAlloc uninitialized)"
   },
   "debugTips": {
     "checkDisassembly": "Check disassembly code at this address",

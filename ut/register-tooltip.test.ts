@@ -123,6 +123,65 @@ describe('RegisterTooltipProvider', () => {
         });
     });
 
+    describe('Use-After-Free Detection', () => {
+        it('should detect MSVC freed heap memory pattern (0xDDDDDDDD)', () => {
+            const content = 'CPU Context:\neax = 0xDDDDDDDD';
+            const document = createMockDocument(content);
+            const position = new vscode.Position(1, 0);
+            const hover = provider.provideHover(document, position, cancelToken);
+            assert.notStrictEqual(hover, undefined, 'Should provide hover for freed memory pattern');
+            const markdown = (hover as vscode.Hover).contents as unknown as vscode.MarkdownString;
+            assert.ok(markdown.value.toLowerCase().includes('free') || markdown.value.includes('freed'),
+                'Should mention use-after-free in hover content');
+        });
+
+        it('should detect Windows HeapFree pattern (0xFEEEFEEE)', () => {
+            const content = 'CPU Context:\nrax = 0xFEEEFEEE';
+            const document = createMockDocument(content);
+            const position = new vscode.Position(1, 0);
+            const hover = provider.provideHover(document, position, cancelToken);
+            assert.notStrictEqual(hover, undefined, 'Should provide hover for HeapFree pattern');
+            const markdown2 = (hover as vscode.Hover).contents as unknown as vscode.MarkdownString;
+            assert.ok(markdown2.value.toLowerCase().includes('free') || markdown2.value.includes('freed'),
+                'Should mention use-after-free in hover content');
+        });
+
+        it('should detect DEADBEEF freed memory marker', () => {
+            const content = 'CPU Context:\nebx = 0xDEADBEEF';
+            const document = createMockDocument(content);
+            const position = new vscode.Position(1, 0);
+            const hover = provider.provideHover(document, position, cancelToken);
+            assert.notStrictEqual(hover, undefined, 'Should provide hover for DEADBEEF pattern');
+            const markdown3 = (hover as vscode.Hover).contents as unknown as vscode.MarkdownString;
+            assert.ok(markdown3.value.toLowerCase().includes('free') || markdown3.value.includes('freed'),
+                'Should mention use-after-free in hover content');
+        });
+    });
+
+    describe('Uninitialized Memory Detection', () => {
+        it('should detect MSVC uninitialized heap memory pattern (0xCDCDCDCD)', () => {
+            const content = 'CPU Context:\neax = 0xCDCDCDCD';
+            const document = createMockDocument(content);
+            const position = new vscode.Position(1, 0);
+            const hover = provider.provideHover(document, position, cancelToken);
+            assert.notStrictEqual(hover, undefined, 'Should provide hover for uninitialized heap pattern');
+            const markdown4 = (hover as vscode.Hover).contents as unknown as vscode.MarkdownString;
+            assert.ok(markdown4.value.toLowerCase().includes('uninitial'),
+                'Should mention uninitialized memory in hover content');
+        });
+
+        it('should detect MSVC uninitialized stack memory pattern (0xCCCCCCCC)', () => {
+            const content = 'CPU Context:\nesp = 0xCCCCCCCC';
+            const document = createMockDocument(content);
+            const position = new vscode.Position(1, 0);
+            const hover = provider.provideHover(document, position, cancelToken);
+            assert.notStrictEqual(hover, undefined, 'Should provide hover for uninitialized stack pattern');
+            const markdown5 = (hover as vscode.Hover).contents as unknown as vscode.MarkdownString;
+            assert.ok(markdown5.value.toLowerCase().includes('uninitial'),
+                'Should mention uninitialized memory in hover content');
+        });
+    });
+
     describe('Register Context Detection', () => {
         it('should detect ARM64 registers in different contexts', () => {
             const contexts = [

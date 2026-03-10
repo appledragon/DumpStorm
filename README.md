@@ -9,7 +9,7 @@ A powerful Visual Studio Code extension for analyzing crash dump files (minidump
 ## 🚀 Key Features
 
 - 🔬 **Advanced Crash Analysis**: Comprehensive minidump (.dmp) file analysis with stack traces, registers, and memory dumps
-- 🧠 **Intelligent Root Cause Detection**: Pattern matching to identify common crash causes (null pointer, buffer overflow, stack overflow)
+- 🧠 **Intelligent Root Cause Detection**: Pattern matching to identify common crash causes (use-after-free, null pointer, buffer overflow, stack overflow, uninitialized memory, heap corruption)
 - 📝 **Text-based Crash Enhancement**: Enhance text-format crash dumps with symbol information
 - 🎯 **Register Tooltips**: Interactive hover information for CPU registers with crash analysis insights
 - 📊 **Symbol Enhancement**: Extract and apply symbols for better crash analysis

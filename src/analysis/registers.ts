@@ -562,6 +562,16 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
             crashAnalysis.push(this.getErrorCodeDescription(numValue));
         }
 
+        // Check for use-after-free patterns (freed memory fill values)
+        if (this.isUseAfterFreePattern(numValue)) {
+            crashAnalysis.push(localization.getCrash('useAfterFree'));
+        }
+
+        // Check for uninitialized memory patterns
+        if (this.isUninitializedMemoryPattern(numValue)) {
+            crashAnalysis.push(localization.getCrash('uninitializedMemory'));
+        }
+
         // Check pointer-related issues
         if (numValue > 0 && numValue < 0x1000) {
             crashAnalysis.push(localization.getCrash('lowAddressValue'));
@@ -620,6 +630,39 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         return tips;
     }
 
+    /**
+     * Check if a register value matches known freed memory fill patterns,
+     * indicating a potential use-after-free bug.
+     */
+    private isUseAfterFreePattern(value: number): boolean {
+        const freedMemoryPatterns = [
+            0xDDDDDDDD,             // MSVC CRT debug freed heap memory (32-bit)
+            0xFEEEFEEE,             // Windows HeapFree'd memory (32-bit)
+            0xDEADBEEF,             // Common freed/invalid memory marker
+        ];
+        // Check both the value itself and its upper bits for 64-bit patterns
+        // For 64-bit: 0xDDDDDDDDDDDDDDDD, 0xFEEEFEEEFEEEFEEE, etc.
+        const lower32 = value >>> 0;
+        return freedMemoryPatterns.includes(lower32) ||
+               freedMemoryPatterns.includes(value);
+    }
+
+    /**
+     * Check if a register value matches known uninitialized memory fill patterns.
+     */
+    private isUninitializedMemoryPattern(value: number): boolean {
+        const uninitPatterns = [
+            0xCDCDCDCD,             // MSVC CRT debug uninitialized heap memory
+            0xCCCCCCCC,             // MSVC CRT debug uninitialized stack memory
+            0xBAADF00D,             // Windows LocalAlloc (LMEM_FIXED) uninitialized
+            0xABABABAB,             // Windows HeapAlloc guard bytes after block
+            0xFDFDFDFD,             // MSVC CRT debug "no man's land" guard bytes
+        ];
+        const lower32 = value >>> 0;
+        return uninitPatterns.includes(lower32) ||
+               uninitPatterns.includes(value);
+    }
+
     private isCommonErrorCode(value: number): boolean {
         const commonErrorCodes = [
             0xC0000005, // ACCESS_VIOLATION
@@ -627,6 +670,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
             0xC000001D, // STATUS_ILLEGAL_INSTRUCTION
             0xC0000094, // STATUS_INTEGER_DIVIDE_BY_ZERO
             0xC00000FD, // STATUS_STACK_OVERFLOW
+            0xC0000374, // STATUS_HEAP_CORRUPTION (often related to use-after-free/double-free)
             0x80000003, // STATUS_BREAKPOINT
             0x80000004, // STATUS_SINGLE_STEP
         ];
@@ -641,6 +685,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
             [0xC000001D, 'illegalInstruction'],
             [0xC0000094, 'divideByZero'],
             [0xC00000FD, 'stackOverflow'],
+            [0xC0000374, 'heapCorruption'],
             [0x80000003, 'breakpoint'],
             [0x80000004, 'singleStep']
         ]);

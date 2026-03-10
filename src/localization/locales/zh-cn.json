@@ -419,6 +419,7 @@
     "stackOverflow": "STATUS_STACK_OVERFLOW - 栈溢出",
     "breakpoint": "STATUS_BREAKPOINT - 断点异常",
     "singleStep": "STATUS_SINGLE_STEP - 单步调试",
+    "heapCorruption": "STATUS_HEAP_CORRUPTION - 堆损坏（通常由释放后使用或重复释放引起）",
     "errorCode": "错误代码：0x{0}"
   },
   "crash": {
@@ -426,7 +427,9 @@
     "lowStackPointer": "栈指针异常偏低，可能发生栈溢出",
     "accessViolationReturn": "返回值0xC0000005表示访问违规异常",
     "unimplementedFunction": "返回值0xC0000001表示未实现函数",
-    "lowAddressValue": "低地址值，可能是野指针或空指针解引用"
+    "lowAddressValue": "低地址值，可能是野指针或空指针解引用",
+    "useAfterFree": "寄存器包含已释放内存填充模式，强烈提示释放后使用（Use-After-Free）漏洞。常见模式：0xDDDDDDDD（MSVC CRT已释放堆内存）、0xFEEEFEEE（Windows HeapFree）、0xDEADBEEF（释放标记）",
+    "uninitializedMemory": "寄存器包含未初始化内存填充模式。常见模式：0xCDCDCDCD（未初始化堆内存）、0xCCCCCCCC（未初始化栈内存）、0xBAADF00D（LocalAlloc未初始化）"
   },
   "debugTips": {
     "checkDisassembly": "检查此地址的反汇编代码",
