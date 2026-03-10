@@ -2,7 +2,13 @@
 
 All notable changes to the DumpStorm extension will be documented in this file.
 
-## [1.0.4] - Unreleased
+## [1.0.4] - 2026-03-10
+
+### Added
+- **Use-After-Free detection**: Recognize freed memory fill patterns (0xDDDDDDDD, 0xFEEEFEEE, 0xDEADBEEF) in register values
+- **Uninitialized memory detection**: Recognize uninitialized memory patterns (0xCDCDCDCD, 0xCCCCCCCC, 0xBAADF00D, etc.)
+- **Heap corruption error code**: Added STATUS_HEAP_CORRUPTION (0xC0000374) to known error codes
+- Localization support (EN/ZH-CN) for all new crash detection patterns
 
 ### Fixed
 - About dialog version is now read dynamically from package.json instead of being hardcoded
