@@ -20,16 +20,21 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         ['si', 'esi'], ['di', 'edi'], ['sp', 'esp'], ['bp', 'ebp'],
     ]);
 
-    constructor() {
+    constructor(context?: vscode.ExtensionContext) {
         this.initializeRegisterDatabase();
         
         // Listen for configuration changes to reload when language changes
-        vscode.workspace.onDidChangeConfiguration((e) => {
+        const configDisposable = vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('minidump-parser.language')) {
                 localization.reload();
                 this.initializeRegisterDatabase();
             }
         });
+        
+        // Register disposable for proper cleanup
+        if (context) {
+            context.subscriptions.push(configDisposable);
+        }
     }
 
     private initializeRegisterDatabase() {

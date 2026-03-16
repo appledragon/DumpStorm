@@ -14,10 +14,11 @@ import { BreakpadPanelProvider } from './ui/panel';
 export function activate(context: vscode.ExtensionContext) {
     // Create and register the panel provider
     const panelProvider = new BreakpadPanelProvider(context);
-    vscode.window.registerTreeDataProvider('minidump-parser-panel', panelProvider);
+    const treeDataProviderDisposable = vscode.window.registerTreeDataProvider('minidump-parser-panel', panelProvider);
+    context.subscriptions.push(treeDataProviderDisposable);
 
     // Register register tooltip provider for crash dump analysis files
-    const registerTooltipProvider = new RegisterTooltipProvider();
+    const registerTooltipProvider = new RegisterTooltipProvider(context);
     const hoverDisposable = vscode.languages.registerHoverProvider(
         [
             { scheme: 'untitled' }, // For untitled documents (analysis results)

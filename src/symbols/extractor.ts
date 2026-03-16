@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -36,17 +36,20 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
             console.log(`  Command: ${nmCommand} -C "${binaryPath}"`);
 
             return new Promise<void>((resolve, reject) => {
-                try {
-                    // Use nm -C to get all symbols with demangled names
-                    // Don't use -D by default as it only shows dynamic symbols (missing local symbols)
-                    let nmOutput: string;
-                    try {
-                        nmOutput = execFileSync(nmCommand, ['-C', binaryPath], { 
-                            encoding: 'utf8',
-                            maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
-                        });
-                    } catch (error: any) {
-                        throw error;
+                // Use async execFile to avoid blocking the UI thread
+                execFile(nmCommand, ['-C', binaryPath], { 
+                    encoding: 'utf8',
+                    maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
+                }, (error, nmOutput, stderr) => {
+                    if (error) {
+                        if (error.message.includes('command not found') || (error as any).status === 127) {
+                            reject(`${nmCommand} command not found. Please ensure developer tools are installed (Xcode Command Line Tools on macOS).`);
+                        } else if (error.message.includes('no symbols') || error.message.includes('not a dynamic object')) {
+                            reject(`No symbols found in ${path.basename(binaryPath)}. The binary may be stripped or not contain symbol information.`);
+                        } else {
+                            reject(`${nmCommand} command failed: ${error.message || error}`);
+                        }
+                        return;
                     }
                     
                     progress.report({ increment: 50, message: "Processing symbol data..." });
@@ -67,16 +70,7 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
                     
                     vscode.window.showInformationMessage(localization.format(localization.getUI('symbolsExtractedSuccessfully'), nmCommand, outputFile));
                     resolve();
-                    
-                } catch (error: any) {
-                    if (error.message.includes('command not found') || error.status === 127) {
-                        reject(`${nmCommand} command not found. Please ensure developer tools are installed (Xcode Command Line Tools on macOS).`);
-                    } else if (error.message.includes('no symbols') || error.message.includes('not a dynamic object')) {
-                        reject(`No symbols found in ${path.basename(binaryPath)}. The binary may be stripped or not contain symbol information.`);
-                    } else {
-                        reject(`${nmCommand} command failed: ${error.message || error}`);
-                    }
-                }
+                });
             });
         });
         
@@ -134,17 +128,15 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
                     // Log the exact command being executed for debugging
                     console.log(`Batch processing: ${nmCommand} for ${binaryPath}`);
 
-                    // Use nm -C to get all symbols with demangled names
-                    // Don't use -D by default as it only shows dynamic symbols (missing local symbols)
-                    let nmOutput: string;
-                    try {
-                        nmOutput = execFileSync(nmCommand, ['-C', binaryPath], { 
+                    // Use async execFile to avoid blocking the UI thread
+                    const nmOutput = await new Promise<string>((resolveNm, rejectNm) => {
+                        execFile(nmCommand, ['-C', binaryPath], { 
                             encoding: 'utf8',
                             maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
+                        }, (err, stdout) => {
+                            if (err) { rejectNm(err); } else { resolveNm(stdout); }
                         });
-                    } catch (error: any) {
-                        throw error;
-                    }
+                    });
                     
                     // Parse nm output and create a more readable format
                     const processedSymbols = processNmOutput(nmOutput, binaryName);

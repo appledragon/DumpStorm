@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { localization } from '../localization/localization';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { BinaryInfo, ToolConfig } from './base-installer';
 
 /**
@@ -106,11 +106,10 @@ export abstract class CurlBaseInstaller {
             
             progress.report({ increment: 10, message: `Downloading ${binaryInfo.toolName} binary file...` });
             
-            // Download using curl
+            // Download using curl (use execFileSync to avoid command injection)
             try {
-                const curlCommand = `curl -L -o "${tempFile}" "${binaryInfo.downloadUrl}"`;
-                console.log(`Downloading with command: ${curlCommand}`);
-                execSync(curlCommand, { stdio: 'inherit' });
+                console.log(`Downloading with curl: curl -L -o "${tempFile}" "${binaryInfo.downloadUrl}"`);
+                execFileSync('curl', ['-L', '-o', tempFile, binaryInfo.downloadUrl], { stdio: 'inherit' });
                 console.log(`Download completed to: ${tempFile}`);
             } catch (downloadError: any) {
                 reject(localization.format(localization.getUI('installer.downloadFailed'), downloadError.message));

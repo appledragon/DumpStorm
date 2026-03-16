@@ -111,7 +111,8 @@ jest.mock('child_process', () => ({
       on: jest.fn()
     }
   })),
-  execSync: jest.fn()
+  execSync: jest.fn(),
+  execFileSync: jest.fn()
 }));
 
 describe('LLVM-NM Curl Installer', () => {

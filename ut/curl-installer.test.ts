@@ -36,7 +36,8 @@ jest.mock('fs', () => ({
 // Mock child_process
 jest.mock('child_process', () => ({
   spawn: jest.fn(),
-  execSync: jest.fn()
+  execSync: jest.fn(),
+  execFileSync: jest.fn()
 }));
 
 // Mock localization
@@ -209,14 +210,14 @@ describe('CurlBaseInstaller', () => {
       // Wait for setTimeout resolve
       await new Promise(resolve => setTimeout(resolve, 2100));
 
-      expect(mockChildProcess.execSync).toHaveBeenCalled();
+      expect(mockChildProcess.execFileSync).toHaveBeenCalled();
       expect(mockProgress.report).toHaveBeenCalled();
       expect(mockReject).not.toHaveBeenCalled();
     });
 
     it('should handle curl download failure', async () => {
-      // Mock failed execSync (curl download fails)
-      mockChildProcess.execSync.mockImplementation(() => {
+      // Mock failed execFileSync (curl download fails)
+      mockChildProcess.execFileSync.mockImplementation(() => {
         throw new Error('curl: (7) Failed to connect to host');
       });
 
