@@ -545,16 +545,56 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
 
         const crashAnalysis: string[] = [];
 
-        // Crash analysis for specific registers
-        if ((lowerRegisterName === 'eip' || lowerRegisterName === 'rip') && numValue === 0) {
-            crashAnalysis.push(localization.getCrash('nullInstructionPointer'));
+        // === x86/x64 instruction pointer analysis ===
+        if (lowerRegisterName === 'eip' || lowerRegisterName === 'rip') {
+            if (numValue === 0) {
+                crashAnalysis.push(localization.getCrash('nullInstructionPointer'));
+            } else if (numValue > 0 && numValue < 0x10000) {
+                crashAnalysis.push(localization.getCrash('lowInstructionPointer'));
+            } else if (this.isStackAddress(numValue, lowerRegisterName)) {
+                crashAnalysis.push(localization.getCrash('ipOnStack'));
+            }
         }
 
-        if ((lowerRegisterName === 'esp' || lowerRegisterName === 'rsp') && numValue < 0x1000) {
-            crashAnalysis.push(localization.getCrash('lowStackPointer'));
+        // === ARM64 program counter analysis ===
+        if (lowerRegisterName === 'pc') {
+            if (numValue === 0) {
+                crashAnalysis.push(localization.getCrash('nullInstructionPointer'));
+            } else if (numValue > 0 && numValue < 0x10000) {
+                crashAnalysis.push(localization.getCrash('lowInstructionPointer'));
+            } else if (numValue % 4 !== 0) {
+                crashAnalysis.push(localization.getCrash('misalignedPC'));
+            }
         }
 
-        if (lowerRegisterName === 'eax' || lowerRegisterName === 'rax') {
+        // === Stack pointer analysis (x86/x64 + ARM64) ===
+        if (lowerRegisterName === 'esp' || lowerRegisterName === 'rsp' ||
+            lowerRegisterName === 'sp') {
+            if (numValue < 0x1000) {
+                crashAnalysis.push(localization.getCrash('lowStackPointer'));
+            } else if (lowerRegisterName === 'sp' && numValue % 16 !== 0) {
+                // ARM64 requires 16-byte aligned SP
+                crashAnalysis.push(localization.getCrash('misalignedSP'));
+            }
+        }
+
+        // === ARM64 link register analysis ===
+        if (lowerRegisterName === 'lr') {
+            if (numValue === 0) {
+                crashAnalysis.push(localization.getCrash('nullLinkRegister'));
+            }
+        }
+
+        // === ARM64 frame pointer analysis ===
+        if (lowerRegisterName === 'fp' || lowerRegisterName === 'x29') {
+            if (numValue === 0) {
+                crashAnalysis.push(localization.getCrash('nullFramePointer'));
+            }
+        }
+
+        // === Return value registers (x86/x64 + ARM64) ===
+        if (lowerRegisterName === 'eax' || lowerRegisterName === 'rax' ||
+            lowerRegisterName === 'x0' || lowerRegisterName === 'r0') {
             if (numValue === 0xC0000005) {
                 crashAnalysis.push(localization.getCrash('accessViolationReturn'));
             } else if (numValue === 0xC0000001) {
@@ -577,9 +617,21 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
             crashAnalysis.push(localization.getCrash('uninitializedMemory'));
         }
 
+        // Check for guard page pattern (typically 0xFD or page boundary)
+        if (this.isGuardPagePattern(numValue)) {
+            crashAnalysis.push(localization.getCrash('guardPageHit'));
+        }
+
         // Check pointer-related issues
         if (numValue > 0 && numValue < 0x1000) {
             crashAnalysis.push(localization.getCrash('lowAddressValue'));
+        }
+
+        // Check for misaligned pointer access on pointer-holding registers
+        if (this.isPointerRegister(lowerRegisterName) && numValue > 0x1000) {
+            if (numValue % 2 !== 0) {
+                crashAnalysis.push(localization.getCrash('misalignedPointer'));
+            }
         }
 
         return crashAnalysis.length > 0 ? crashAnalysis.join(', ') : undefined;
@@ -590,7 +642,7 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         const lowerName = registerInfo.name.toLowerCase();
 
         // Give debugging suggestions based on register type
-        if (lowerName.includes('eip') || lowerName.includes('rip')) {
+        if (lowerName.includes('eip') || lowerName.includes('rip') || lowerName === 'pc') {
             tips.push(localization.getDebugTip('checkDisassembly'));
             tips.push(localization.getDebugTip('verifyCodeAddress'));
             if (value) {
@@ -598,23 +650,34 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
             }
         }
 
-        if (lowerName.includes('esp') || lowerName.includes('rsp')) {
+        if (lowerName.includes('esp') || lowerName.includes('rsp') || lowerName === 'sp') {
             tips.push(localization.getDebugTip('checkStackIntegrity'));
             tips.push(localization.getDebugTip('checkStackTrace'));
             tips.push(localization.getDebugTip('checkStackOverflow'));
         }
 
-        if (lowerName.includes('ebp') || lowerName.includes('rbp')) {
+        if (lowerName.includes('ebp') || lowerName.includes('rbp') || lowerName === 'fp' || lowerName === 'x29') {
             tips.push(localization.getDebugTip('checkStackFrame'));
             tips.push(localization.getDebugTip('checkLocalVariables'));
         }
 
-        if (lowerName.includes('eax') || lowerName.includes('rax')) {
+        if (lowerName.includes('eax') || lowerName.includes('rax') || lowerName === 'x0' || lowerName === 'r0') {
             tips.push(localization.getDebugTip('functionReturnValue'));
             tips.push(localization.getDebugTip('checkErrorStatus'));
         }
 
+        if (lowerName === 'lr' || lowerName === 'x30') {
+            tips.push(localization.getDebugTip('checkDisassembly'));
+            tips.push(localization.getDebugTip('verifyCodeAddress'));
+        }
+
         if (registerInfo.architecture === 'x64' && (lowerName.includes('rcx') || lowerName.includes('rdx') || lowerName.includes('r8') || lowerName.includes('r9'))) {
+            tips.push(localization.getDebugTip('functionParameter'));
+            tips.push(localization.getDebugTip('checkCallingConvention'));
+        }
+
+        // ARM64 argument registers
+        if (registerInfo.architecture === 'ARM64' && /^x[0-7]$/.test(lowerName)) {
             tips.push(localization.getDebugTip('functionParameter'));
             tips.push(localization.getDebugTip('checkCallingConvention'));
         }
@@ -681,6 +744,44 @@ export class RegisterTooltipProvider implements vscode.HoverProvider {
         ];
         
         return commonErrorCodes.includes(value);
+    }
+
+    /**
+     * Check if a value looks like a guard page hit
+     * (Windows guard page exception or stack guard).
+     */
+    private isGuardPagePattern(value: number): boolean {
+        return value === 0x80000001; // STATUS_GUARD_PAGE_VIOLATION
+    }
+
+    /**
+     * Check if an instruction pointer value falls in typical stack address ranges,
+     * which would indicate code execution on the stack (e.g., buffer overflow exploit).
+     */
+    private isStackAddress(value: number, registerName: string): boolean {
+        // x86 stack: typically 0x00100000 - 0x00FFFFFF (low range) or near thread stack
+        // x64 stack: high user-space addresses, but these vary per OS
+        // This is a heuristic: common Windows thread stack range
+        if (registerName === 'eip') {
+            return value >= 0x00100000 && value <= 0x00FFFFFF;
+        }
+        // For x64, stack addresses are typically in high user-space
+        // We'll flag clearly stack-range addresses
+        return false;
+    }
+
+    /**
+     * Check if a register typically holds pointer values.
+     */
+    private isPointerRegister(registerName: string): boolean {
+        const pointerRegisters = [
+            'eax', 'rax', 'ebx', 'rbx', 'ecx', 'rcx', 'edx', 'rdx',
+            'esi', 'rsi', 'edi', 'rdi',
+            // ARM64
+            'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8',
+            'r0', 'r1', 'r2', 'r3',
+        ];
+        return pointerRegisters.includes(registerName);
     }
 
     private getErrorCodeDescription(value: number): string {

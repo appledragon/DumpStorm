@@ -136,15 +136,233 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
     });
 }
 
+/**
+ * Stack frame confidence level based on "Found by:" method from minidump_stackwalk.
+ */
+export enum FrameConfidence {
+    /** First frame from exception context - always accurate */
+    CONTEXT = 'context',
+    /** Unwound via CFI/DWARF unwind info - high confidence */
+    CFI = 'cfi',
+    /** Unwound via frame pointer chain - medium confidence */
+    FRAME_POINTER = 'frame_pointer',
+    /** Found by scanning stack for return addresses - low confidence, often inaccurate */
+    STACK_SCANNING = 'stack_scanning',
+    /** Unknown unwinding method */
+    UNKNOWN = 'unknown'
+}
+
+/**
+ * Map "Found by:" text from minidump_stackwalk to confidence level.
+ */
+export function parseFrameConfidence(foundByText: string): FrameConfidence {
+    const lower = foundByText.toLowerCase().trim();
+    if (lower.includes('given as instruction pointer in context')) {
+        return FrameConfidence.CONTEXT;
+    }
+    if (lower.includes('call frame info')) {
+        return FrameConfidence.CFI;
+    }
+    if (lower.includes('frame pointer')) {
+        return FrameConfidence.FRAME_POINTER;
+    }
+    if (lower.includes('stack scanning')) {
+        return FrameConfidence.STACK_SCANNING;
+    }
+    return FrameConfidence.UNKNOWN;
+}
+
+/**
+ * Get a human-readable confidence label for a frame confidence level.
+ */
+function getConfidenceLabel(confidence: FrameConfidence): string {
+    switch (confidence) {
+        case FrameConfidence.CONTEXT:
+            return '[confidence: HIGH - exception context]';
+        case FrameConfidence.CFI:
+            return '[confidence: HIGH - CFI unwind]';
+        case FrameConfidence.FRAME_POINTER:
+            return '[confidence: MEDIUM - frame pointer]';
+        case FrameConfidence.STACK_SCANNING:
+            return '[confidence: LOW - stack scanning ⚠]';
+        case FrameConfidence.UNKNOWN:
+            return '';
+    }
+}
+
+/**
+ * Crash summary extracted from minidump_stackwalk output.
+ */
+export interface CrashSummary {
+    crashReason: string;
+    crashAddress: string;
+    crashingThread: number;
+    crashingModule: string;
+    operatingSystem: string;
+    cpuInfo: string;
+    processUptime: string;
+    assertion: string;
+    /** Number of frames found by stack scanning (low confidence) */
+    stackScanFrameCount: number;
+    /** Total number of stack frames */
+    totalFrameCount: number;
+}
+
+/**
+ * Parse a crash summary from minidump_stackwalk raw output.
+ */
+export function parseCrashSummary(output: string): CrashSummary {
+    const summary: CrashSummary = {
+        crashReason: '',
+        crashAddress: '',
+        crashingThread: -1,
+        crashingModule: '',
+        operatingSystem: '',
+        cpuInfo: '',
+        processUptime: '',
+        assertion: '',
+        stackScanFrameCount: 0,
+        totalFrameCount: 0
+    };
+
+    const lines = output.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Crash reason: EXCEPTION_ACCESS_VIOLATION_READ
+        const reasonMatch = trimmed.match(/^Crash reason:\s*(.+)$/i);
+        if (reasonMatch) {
+            summary.crashReason = reasonMatch[1].trim();
+            continue;
+        }
+
+        // Crash address: 0x0
+        const addrMatch = trimmed.match(/^Crash address:\s*(0x[0-9a-fA-F]+)$/i);
+        if (addrMatch) {
+            summary.crashAddress = addrMatch[1];
+            continue;
+        }
+
+        // Thread 0 (crashed)
+        const threadMatch = trimmed.match(/^Thread\s+(\d+)\s+\(crashed\)/i);
+        if (threadMatch) {
+            summary.crashingThread = parseInt(threadMatch[1], 10);
+            continue;
+        }
+
+        // First frame of crashed thread: "0  module_name + 0xoffset"
+        if (summary.crashingThread >= 0 && !summary.crashingModule) {
+            const frameMatch = trimmed.match(/^0\s+([^\s+]+)/);
+            if (frameMatch) {
+                summary.crashingModule = frameMatch[1];
+            }
+        }
+
+        // Operating system: Windows NT 10.0.19041
+        const osMatch = trimmed.match(/^Operating system:\s*(.+)$/i);
+        if (osMatch) {
+            summary.operatingSystem = osMatch[1].trim();
+            continue;
+        }
+
+        // CPU: amd64 family 6 model ...
+        const cpuMatch = trimmed.match(/^CPU:\s*(.+)$/i);
+        if (cpuMatch) {
+            summary.cpuInfo = cpuMatch[1].trim();
+            continue;
+        }
+
+        // Process uptime: 12 seconds
+        const uptimeMatch = trimmed.match(/^Process uptime:\s*(.+)$/i);
+        if (uptimeMatch) {
+            summary.processUptime = uptimeMatch[1].trim();
+            continue;
+        }
+
+        // Assertion: ...
+        const assertMatch = trimmed.match(/^Assertion:\s*(.+)$/i);
+        if (assertMatch) {
+            summary.assertion = assertMatch[1].trim();
+            continue;
+        }
+
+        // Count stack frames and stack-scan frames
+        if (trimmed.match(/^\d+\s+/)) {
+            summary.totalFrameCount++;
+        }
+        if (trimmed.startsWith('Found by:') && trimmed.toLowerCase().includes('stack scanning')) {
+            summary.stackScanFrameCount++;
+        }
+    }
+
+    return summary;
+}
+
+/**
+ * Format a crash summary block to prepend to the output.
+ */
+function formatCrashSummaryBlock(summary: CrashSummary): string {
+    const lines: string[] = ['=== CRASH SUMMARY ==='];
+
+    if (summary.crashReason) {
+        lines.push(`Crash Reason  : ${summary.crashReason}`);
+    }
+    if (summary.crashAddress) {
+        lines.push(`Crash Address : ${summary.crashAddress}`);
+    }
+    if (summary.crashingThread >= 0) {
+        lines.push(`Crashing Thread: ${summary.crashingThread}`);
+    }
+    if (summary.crashingModule) {
+        lines.push(`Crashing Module: ${summary.crashingModule}`);
+    }
+    if (summary.operatingSystem) {
+        lines.push(`OS            : ${summary.operatingSystem}`);
+    }
+    if (summary.cpuInfo) {
+        lines.push(`CPU           : ${summary.cpuInfo}`);
+    }
+    if (summary.processUptime) {
+        lines.push(`Uptime        : ${summary.processUptime}`);
+    }
+    if (summary.assertion) {
+        lines.push(`Assertion     : ${summary.assertion}`);
+    }
+
+    // Stack quality indicator
+    if (summary.totalFrameCount > 0) {
+        const scanPercent = Math.round((summary.stackScanFrameCount / summary.totalFrameCount) * 100);
+        let quality = 'HIGH';
+        let qualityNote = '';
+        if (scanPercent > 50) {
+            quality = 'LOW';
+            qualityNote = ' - majority of frames found by stack scanning, results may be inaccurate';
+        } else if (scanPercent > 20) {
+            quality = 'MEDIUM';
+            qualityNote = ' - some frames found by stack scanning';
+        }
+        lines.push(`Stack Quality : ${quality} (${summary.stackScanFrameCount}/${summary.totalFrameCount} frames from stack scanning)${qualityNote}`);
+    }
+
+    lines.push('='.repeat(50));
+    lines.push('');
+    return lines.join('\n');
+}
+
 export function cleanStackwalkOutput(stdout: string, stderr: string): string {
     const lines = stdout.split('\n');
     const cleanLines: string[] = [];
     let inCrashSection = false;
     let foundMainInfo = false;
     let previousLineWasHeader = false;
+    let lastFrameIndex = -1;
+    
+    // First pass: parse crash summary from raw output
+    const summary = parseCrashSummary(stdout);
     
     // Filter out debug/informational lines and keep relevant crash data
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         const trimmedLine = line.trim();
         
         // Skip empty lines
@@ -175,11 +393,37 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
             trimmedLine.startsWith('Assertion:') ||
             trimmedLine.startsWith('Thread') ||
             trimmedLine.startsWith('Loaded modules:') ||
-            trimmedLine.startsWith('Found by:') ||
             trimmedLine.includes('crashed') ||
             trimmedLine.match(/^\d+\s+\S+/)) { // Stack frame lines: frame number followed by module/address
             foundMainInfo = true;
-            cleanLines.push(line);
+            
+            // Annotate stack frames with confidence level from the next "Found by:" line
+            if (trimmedLine.match(/^\d+\s+\S+/)) {
+                lastFrameIndex = cleanLines.length;
+                // Look ahead for "Found by:" line
+                for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+                    const nextTrimmed = lines[j].trim();
+                    if (nextTrimmed.startsWith('Found by:')) {
+                        const confidence = parseFrameConfidence(nextTrimmed);
+                        const label = getConfidenceLabel(confidence);
+                        if (label) {
+                            cleanLines.push(`${line}  ${label}`);
+                            lastFrameIndex = -1;
+                            break;
+                        }
+                    }
+                    // Stop if we hit another frame or major section
+                    if (nextTrimmed.match(/^\d+\s+\S+/) || nextTrimmed.startsWith('Thread')) {
+                        break;
+                    }
+                }
+                if (lastFrameIndex >= 0) {
+                    cleanLines.push(line);
+                    lastFrameIndex = -1;
+                }
+            } else {
+                cleanLines.push(line);
+            }
             
             previousLineWasHeader = (
                 trimmedLine.startsWith('CPU:') ||
@@ -190,6 +434,16 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
             if (trimmedLine.startsWith('Thread') && trimmedLine.includes('crashed')) {
                 inCrashSection = true;
             }
+            // Reset crash section when we hit a non-crashed thread
+            if (trimmedLine.startsWith('Thread') && !trimmedLine.includes('crashed')) {
+                inCrashSection = false;
+            }
+        }
+        // "Found by:" lines - keep them as they indicate stack frame quality
+        else if (trimmedLine.startsWith('Found by:')) {
+            // Already handled in look-ahead above for frame annotation;
+            // Still keep standalone Found by: lines for reference
+            cleanLines.push(line);
         }
         // Keep continuation/detail lines (indented lines following CPU:, GPU:, etc.)
         else if (previousLineWasHeader && line.startsWith(' ')) {
@@ -219,6 +473,11 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
     }
     
     let result = cleanLines.join('\n');
+    
+    // Prepend crash summary if we have meaningful info
+    if (summary.crashReason || summary.crashAddress || summary.crashingThread >= 0) {
+        result = formatCrashSummaryBlock(summary) + result;
+    }
     
     // Add stderr info if it contains useful error messages (not just debug info)
     if (stderr && stderr.trim().length > 0) {

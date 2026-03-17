@@ -427,10 +427,18 @@
   },
   "crash": {
     "nullInstructionPointer": "Instruction pointer is NULL, possibly caused by null function pointer crash",
+    "lowInstructionPointer": "Instruction pointer is at a very low address, likely a null pointer dereference through an object offset or vtable call",
+    "ipOnStack": "Instruction pointer appears to be in the stack address range, possible stack buffer overflow leading to code execution on stack",
+    "misalignedPC": "ARM64 program counter (PC) is not 4-byte aligned, indicating corrupted PC value or invalid branch target",
     "lowStackPointer": "Stack pointer abnormally low, possible stack overflow",
+    "misalignedSP": "ARM64 stack pointer is not 16-byte aligned, which violates the ARM64 ABI and will cause a crash",
+    "nullLinkRegister": "ARM64 link register (LR) is NULL, the crashed function was called through a null function pointer or LR was corrupted",
+    "nullFramePointer": "Frame pointer is NULL, stack frame chain is broken - may indicate stack corruption or invalid unwinding",
     "accessViolationReturn": "Return value 0xC0000005 indicates access violation exception",
     "unimplementedFunction": "Return value 0xC0000001 indicates unimplemented function",
     "lowAddressValue": "Low address value, possibly wild pointer or null pointer dereference",
+    "guardPageHit": "Guard page violation detected (STATUS_GUARD_PAGE_VIOLATION 0x80000001), may indicate stack probe failure or intentional guard page access",
+    "misalignedPointer": "Pointer value is oddly aligned, may indicate memory corruption or type confusion",
     "useAfterFree": "Register contains freed memory fill pattern, strongly suggests use-after-free (UAF) bug. Common patterns: 0xDDDDDDDD (MSVC CRT freed heap), 0xFEEEFEEE (Windows HeapFree), 0xDEADBEEF (freed marker)",
     "uninitializedMemory": "Register contains uninitialized memory fill pattern. Common patterns: 0xCDCDCDCD (uninitialized heap), 0xCCCCCCCC (uninitialized stack), 0xBAADF00D (LocalAlloc uninitialized)"
   },

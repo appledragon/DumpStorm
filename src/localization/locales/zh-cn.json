@@ -424,10 +424,18 @@
   },
   "crash": {
     "nullInstructionPointer": "指令指针为空，可能由空函数指针调用导致",
+    "lowInstructionPointer": "指令指针位于极低地址，可能是通过对象偏移或虚表（vtable）调用导致的空指针解引用",
+    "ipOnStack": "指令指针似乎位于栈地址范围，可能存在栈缓冲区溢出导致在栈上执行代码",
+    "misalignedPC": "ARM64 程序计数器（PC）未按4字节对齐，表示 PC 值已损坏或跳转目标无效",
     "lowStackPointer": "栈指针异常偏低，可能发生栈溢出",
+    "misalignedSP": "ARM64 栈指针未按16字节对齐，违反了 ARM64 ABI 规范，将导致崩溃",
+    "nullLinkRegister": "ARM64 链接寄存器（LR）为空，崩溃函数可能是通过空函数指针调用的，或 LR 已被破坏",
+    "nullFramePointer": "帧指针为空，栈帧链断裂 - 可能表示栈损坏或无效的栈展开",
     "accessViolationReturn": "返回值0xC0000005表示访问违规异常",
     "unimplementedFunction": "返回值0xC0000001表示未实现函数",
     "lowAddressValue": "低地址值，可能是野指针或空指针解引用",
+    "guardPageHit": "检测到守护页违规（STATUS_GUARD_PAGE_VIOLATION 0x80000001），可能表示栈探测失败或有意的守护页访问",
+    "misalignedPointer": "指针值未对齐，可能表示内存损坏或类型混淆",
     "useAfterFree": "寄存器包含已释放内存填充模式，强烈提示释放后使用（Use-After-Free）漏洞。常见模式：0xDDDDDDDD（MSVC CRT已释放堆内存）、0xFEEEFEEE（Windows HeapFree）、0xDEADBEEF（释放标记）",
     "uninitializedMemory": "寄存器包含未初始化内存填充模式。常见模式：0xCDCDCDCD（未初始化堆内存）、0xCCCCCCCC（未初始化栈内存）、0xBAADF00D（LocalAlloc未初始化）"
   },
