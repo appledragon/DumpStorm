@@ -1,0 +1,205 @@
+Operating system: Windows NT
+                  10.0.26200 
+CPU: amd64
+     family 6 model 141 stepping 1
+     16 CPUs
+
+GPU: UNKNOWN
+
+Crash reason:  EXCEPTION_BREAKPOINT
+Crash address: 0x7ffe293773fa
+Process uptime: 0 seconds
+
+Thread 0 (crashed)
+ 0  KERNELBASE.dll + 0xc73fa
+    rax = 0x000000e5d26feb20   rdx = 0x0000000000000207
+    rcx = 0x000002077b580207   rbx = 0x0000000000000000
+    rsi = 0x0000000000000000   rdi = 0x0000000080000003
+    rbp = 0x0000000000000000   rsp = 0x000000e5d26ff7e0
+     r8 = 0x0000000000000000    r9 = 0x000002657b581f50
+    r10 = 0x000000e5d26feb40   r11 = 0x000002657b550000
+    r12 = 0x0000000000000000   r13 = 0x0000000000000000
+    r14 = 0x0000000000000000   r15 = 0x0000000000000000
+    rip = 0x00007ffe293773fa
+    Found by: given as instruction pointer in context
+ 1  KERNELBASE.dll + 0xc73fa
+    rsp = 0x000000e5d26ff818   rip = 0x00007ffe293773fa
+    Found by: stack scanning
+ 2  crash_test.exe + 0x1ca9
+    rsp = 0x000000e5d26ff8e0   rip = 0x00007ff79a361ca9
+    Found by: stack scanning
+ 3  crash_test.exe + 0x21eb
+    rsp = 0x000000e5d26ff910   rip = 0x00007ff79a3621eb
+    Found by: stack scanning
+ 4  crash_test.exe + 0xef10
+    rsp = 0x000000e5d26ff920   rip = 0x00007ff79a36ef10
+    Found by: stack scanning
+ 5  crash_test.exe + 0xecd0
+    rsp = 0x000000e5d26ff940   rip = 0x00007ff79a36ecd0
+    Found by: stack scanning
+ 6  crash_test.exe + 0xec70
+    rsp = 0x000000e5d26ff948   rip = 0x00007ff79a36ec70
+    Found by: stack scanning
+ 7  crash_test.exe + 0xecd0
+    rsp = 0x000000e5d26ff950   rip = 0x00007ff79a36ecd0
+    Found by: stack scanning
+ 8  crash_test.exe + 0xed00
+    rsp = 0x000000e5d26ff958   rip = 0x00007ff79a36ed00
+    Found by: stack scanning
+ 9  crash_test.exe + 0xecd0
+    rsp = 0x000000e5d26ff960   rip = 0x00007ff79a36ecd0
+    Found by: stack scanning
+10  crash_test.exe + 0xedc8
+    rsp = 0x000000e5d26ffa98   rip = 0x00007ff79a36edc8
+    Found by: stack scanning
+11  crash_test.exe + 0xedc0
+    rsp = 0x000000e5d26ffaa0   rip = 0x00007ff79a36edc0
+    Found by: stack scanning
+12  ucrtbased.dll + 0x1ebcf0
+    rsp = 0x000000e5d26ffaa8   rip = 0x00007ffd85a6bcf0
+    Found by: stack scanning
+13  ucrtbased.dll + 0x1ebcf0
+    rsp = 0x000000e5d26ffab8   rip = 0x00007ffd85a6bcf0
+    Found by: stack scanning
+14  crash_test.exe + 0x5f59
+    rsp = 0x000000e5d26ffad0   rip = 0x00007ff79a365f59
+    Found by: stack scanning
+15  crash_test.exe + 0x771d
+    rsp = 0x000000e5d26ffaf0   rip = 0x00007ff79a36771d
+    Found by: stack scanning
+16  crash_test.exe + 0x5c80
+    rsp = 0x000000e5d26ffb10   rip = 0x00007ff79a365c80
+    Found by: stack scanning
+17  crash_test.exe + 0x5e02
+    rsp = 0x000000e5d26ffb20   rip = 0x00007ff79a365e02
+    Found by: stack scanning
+18  crash_test.exe + 0xe000
+    rsp = 0x000000e5d26ffb28   rip = 0x00007ff79a36e000
+    Found by: stack scanning
+19  crash_test.exe + 0xe220
+    rsp = 0x000000e5d26ffb30   rip = 0x00007ff79a36e220
+    Found by: stack scanning
+20  crash_test.exe + 0x13d38
+    rsp = 0x000000e5d26ffb58   rip = 0x00007ff79a373d38
+    Found by: stack scanning
+21  crash_test.exe + 0x13d20
+    rsp = 0x000000e5d26ffb60   rip = 0x00007ff79a373d20
+    Found by: stack scanning
+22  crash_test.exe + 0x5cbe
+    rsp = 0x000000e5d26ffb90   rip = 0x00007ff79a365cbe
+    Found by: stack scanning
+23  crash_test.exe + 0x5fee
+    rsp = 0x000000e5d26ffbc0   rip = 0x00007ff79a365fee
+    Found by: stack scanning
+24  kernel32.dll + 0x2e8d7
+    rsp = 0x000000e5d26ffbf0   rip = 0x00007ffe2aefe8d7
+    Found by: stack scanning
+25  ntdll.dll + 0x8c48c
+    rsp = 0x000000e5d26ffc20   rip = 0x00007ffe2c9ac48c
+    Found by: stack scanning
+26  KERNELBASE.dll + 0x115510
+    rsp = 0x000000e5d26ffc50   rip = 0x00007ffe293c5510
+    Found by: stack scanning
+
+Thread 1
+ 0  ntdll.dll + 0x165744
+    rax = 0x00000000000001e6   rdx = 0x000002657b5641b0
+    rcx = 0x00000000000000ac   rbx = 0x000002657b564530
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d27ff408
+     r8 = 0x0000000000000010    r9 = 0x000000e5d27ff468
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2ca85744
+    Found by: given as instruction pointer in context
+ 1  ntdll.dll + 0x75e8e
+    rax = 0x00000000000001e6   rdx = 0x000002657b5641b0
+    rcx = 0x00000000000000ac   rbx = 0x000002657b564530
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d27ff410
+     r8 = 0x0000000000000010    r9 = 0x000000e5d27ff468
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2c995e8e
+    Found by: simulating a return from leaf function
+
+Thread 2
+ 0  ntdll.dll + 0x165744
+    rax = 0x00000000000001e6   rdx = 0x000002657b564840
+    rcx = 0x00000000000000ac   rbx = 0x000002657b564bc0
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d28ffb38
+     r8 = 0x0000000000000010    r9 = 0x000000e5d28ffb98
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2ca85744
+    Found by: given as instruction pointer in context
+ 1  ntdll.dll + 0x75e8e
+    rax = 0x00000000000001e6   rdx = 0x000002657b564840
+    rcx = 0x00000000000000ac   rbx = 0x000002657b564bc0
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d28ffb40
+     r8 = 0x0000000000000010    r9 = 0x000000e5d28ffb98
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2c995e8e
+    Found by: simulating a return from leaf function
+ 2  ntdll.dll + 0x74df0
+    rsp = 0x000000e5d28ffb58   rip = 0x00007ffe2c994df0
+    Found by: stack scanning
+
+Thread 3
+ 0  ntdll.dll + 0x165744
+    rax = 0x00000000000001e6   rdx = 0x000002657b564e40
+    rcx = 0x00000000000000ac   rbx = 0x000002657b5651c0
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d29ff7e8
+     r8 = 0x0000000000000010    r9 = 0x000000e5d29ff848
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2ca85744
+    Found by: given as instruction pointer in context
+ 1  ntdll.dll + 0x75e8e
+    rax = 0x00000000000001e6   rdx = 0x000002657b564e40
+    rcx = 0x00000000000000ac   rbx = 0x000002657b5651c0
+    rsi = 0x00007ffe2c994df0   rdi = 0x000002657b561d80
+    rbp = 0x0000000000000000   rsp = 0x000000e5d29ff7f0
+     r8 = 0x0000000000000010    r9 = 0x000000e5d29ff848
+    r10 = 0x00000000000000ac   r11 = 0x00000000000000ac
+    r12 = 0x00007ffe2c9fa4c0   r13 = 0x0000000000000000
+    r14 = 0x000000000000ffff   r15 = 0x00007ffe2c992b60
+    rip = 0x00007ffe2c995e8e
+    Found by: simulating a return from leaf function
+ 2  ntdll.dll + 0x74df0
+    rsp = 0x000000e5d29ff808   rip = 0x00007ffe2c994df0
+    Found by: stack scanning
+
+Loaded modules:
+0x7ff79a360000 - 0x7ff79a379fff  crash_test.exe  ???  (main)  (WARNING: No symbols, crash_test.pdb, 30E06B71DAC542C7A92D89B3B3EA537E2)
+0x7ffd85880000 - 0x7ffd85a83fff  ucrtbased.dll  10.0.26100.7175  (WARNING: No symbols, ucrtbased.pdb, DA474C26F6B3650652A1757B7FB492762)
+0x7ffdec620000 - 0x7ffdec700fff  MSVCP140D.dll  14.44.35211.0
+0x7ffe0e7b0000 - 0x7ffe0e7dffff  VCRUNTIME140D.dll  14.44.35211.0
+0x7ffe15290000 - 0x7ffe1529afff  version.dll  6.2.26100.1150
+0x7ffe1a880000 - 0x7ffe1a8bafff  dbgcore.dll  6.2.26100.7920
+0x7ffe200f0000 - 0x7ffe200fefff  VCRUNTIME140_1D.dll  14.44.35211.0
+0x7ffe25c50000 - 0x7ffe25ceefff  apphelp.dll  6.2.26100.7920
+0x7ffe26ee0000 - 0x7ffe27121fff  dbghelp.dll  6.2.26100.5074
+0x7ffe29200000 - 0x7ffe292a2fff  msvcp_win.dll  6.2.26100.7623
+0x7ffe292b0000 - 0x7ffe296a0fff  KERNELBASE.dll  6.2.26100.7920  (WARNING: No symbols, kernelbase.pdb, 92F6993C1974DB86F9A4DE4D51FB4CB41)
+0x7ffe296b0000 - 0x7ffe29754fff  bcryptPrimitives.dll  6.2.26100.7623
+0x7ffe2a400000 - 0x7ffe2a54afff  ucrtbase.dll  6.2.26100.7623
+0x7ffe2aa60000 - 0x7ffe2aa67fff  psapi.dll  6.2.26100.1
+0x7ffe2aba0000 - 0x7ffe2acb7fff  rpcrt4.dll  6.2.26100.8036
+0x7ffe2aed0000 - 0x7ffe2af98fff  kernel32.dll  6.2.26100.7920  (WARNING: No symbols, kernel32.pdb, F7B745DE7A69EF1B7C8BE0C4FDED10A11)
+0x7ffe2afa0000 - 0x7ffe2b321fff  combase.dll  6.2.26100.7920
+0x7ffe2b330000 - 0x7ffe2b3eafff  advapi32.dll  6.2.26100.7920
+0x7ffe2b3f0000 - 0x7ffe2b496fff  sechost.dll  6.2.26100.7920
+0x7ffe2b4a0000 - 0x7ffe2b576fff  oleaut32.dll  6.2.26100.7920
+0x7ffe2c830000 - 0x7ffe2c8d8fff  msvcrt.dll  7.0.26100.7623
+0x7ffe2c920000 - 0x7ffe2cb86fff  ntdll.dll  6.2.26100.7920  (WARNING: No symbols, ntdll.pdb, 5A9F4004DB806B50BCBD7B6C55417B041)
+

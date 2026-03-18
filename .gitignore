@@ -27,5 +27,3 @@ test.sh
 check_tool.sh
 /coverage
 /tests/crashers/build
-/tests/crashers/dumps
-/tests/crashers/analysis
