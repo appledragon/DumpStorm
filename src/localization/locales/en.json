@@ -404,7 +404,9 @@
     "chooseInstallationMethodStackwalk": "Choose Installation Method for minidump_stackwalk",
     "installingStackwalkStandard": "Installing minidump_stackwalk (Standard)...",
     "installingStackwalkAlternative": "Installing minidump_stackwalk (Alternative)...",
-    "stackwalkInstallationSuccess": "✅ Good choice! Using recommended reliable download method..."
+    "stackwalkInstallationSuccess": "✅ Good choice! Using recommended reliable download method...",
+    "clickToOpenInstallFolder": "Click to open install folder",
+    "systemPath": "Available via system PATH"
   },
   "values": {
     "nullPointer": "NULL pointer",

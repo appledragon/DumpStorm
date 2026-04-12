@@ -2,6 +2,13 @@
 
 All notable changes to the DumpStorm extension will be documented in this file.
 
+## [1.0.5] - 2026-04-12
+
+### Added
+- **Tool path tooltips**: Installed tools (nm/llvm-nm, minidump_stackwalk) now show rich Markdown tooltips with binary path and installation status
+- **Click to reveal**: Clicking on an installed tool item opens the binary location in the OS file explorer
+- Localization support (EN/ZH-CN) for new tooltip strings
+
 ## [1.0.4] - 2026-03-10
 
 ### Added

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { DEFAULT_CONFIG, isNmAvailable, getCustomMinidumpStackwalkPath, getCustomNmPath, getCustomLlvmNmPath, MINIDUMP_STACKWALK_CONFIG, getBinaryName, getLlvmNmBinaryName } from '../config/config';
+import { DEFAULT_CONFIG, isNmAvailable, getNmCommand, getCustomMinidumpStackwalkPath, getCustomNmPath, getCustomLlvmNmPath, MINIDUMP_STACKWALK_CONFIG, getBinaryName, getLlvmNmBinaryName } from '../config/config';
 import { installMinidumpStackwalk } from '../tools/minidump-stackwalk-installer';
 import { installLlvmNm } from '../tools/llvm-nm-installer';
 import { installMinidumpStackwalkWithCurl } from '../tools/minidump-stackwalk-installer-curl';
@@ -150,17 +150,47 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const items: BreakpadItem[] = [];
             
             // Check if nm is available
-            const nmAvailable = isNmAvailable();
-            const nmStatus = nmAvailable ? localization.getUI('autoInstalled') : localization.getUI('notFound');
-            items.push(new BreakpadItem(
+            let nmBinaryPath: string | undefined;
+            let nmIsAvailable = false;
+            try {
+                const nmPath = getNmCommand();
+                nmIsAvailable = true;
+                if (nmPath !== 'nm' && nmPath !== 'llvm-nm') {
+                    nmBinaryPath = nmPath;
+                }
+            } catch {
+                // nm not available
+            }
+            const nmStatus = nmIsAvailable ? localization.getUI('autoInstalled') : localization.getUI('notFound');
+            
+            const nmItem = new BreakpadItem(
                 `nm/llvm-nm: ${nmStatus}`,
                 vscode.TreeItemCollapsibleState.None,
-                undefined,
+                nmBinaryPath ? {
+                    command: 'minidump-parser.revealToolPath',
+                    title: localization.getUI('clickToOpenInstallFolder'),
+                    arguments: [nmBinaryPath]
+                } : undefined,
                 'nmStatus'
-            ));
+            );
+            
+            if (nmIsAvailable) {
+                const nmTooltip = new vscode.MarkdownString();
+                nmTooltip.appendMarkdown(`**\u2705 nm/llvm-nm**\n\n`);
+                nmTooltip.appendMarkdown(`---\n\n`);
+                if (nmBinaryPath) {
+                    nmTooltip.appendMarkdown(`\uD83D\uDCC2 \`${nmBinaryPath}\`\n\n`);
+                    nmTooltip.appendMarkdown(`\uD83D\uDC46 *${localization.getUI('clickToOpenInstallFolder')}*`);
+                } else {
+                    nmTooltip.appendMarkdown(`${localization.getUI('systemPath')}`);
+                }
+                nmItem.tooltip = nmTooltip;
+            }
+            
+            items.push(nmItem);
 
             // Add install llvm-nm button if nm is not found
-            if (!nmAvailable) {
+            if (!nmIsAvailable) {
                 items.push(new BreakpadItem(
                     localization.getUI('installLlvmNm'),
                     vscode.TreeItemCollapsibleState.None,
@@ -178,9 +208,11 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 // Try to find minidump_stackwalk
                 const customPath = getCustomMinidumpStackwalkPath();
                 let stackwalkStatus = localization.getUI('notFound');
+                let stackwalkBinaryPath: string | undefined;
                 
                 if (customPath && fs.existsSync(customPath)) {
-                    stackwalkStatus = '✅ Custom Path';
+                    stackwalkStatus = '\u2705 Custom Path';
+                    stackwalkBinaryPath = customPath;
                 } else {
                     // Check if auto-installed version exists in ~/.dumpstorm/bin
                     const platform = os.platform();
@@ -188,15 +220,31 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                     const autoInstalledPath = path.join(os.homedir(), MINIDUMP_STACKWALK_CONFIG.INSTALL_PATHS.DUMPSTORM_BIN, binaryName);
                     if (fs.existsSync(autoInstalledPath)) {
                         stackwalkStatus = localization.getUI('autoInstalled');
+                        stackwalkBinaryPath = autoInstalledPath;
                     }
                 }
                 
-                items.push(new BreakpadItem(
+                const stackwalkItem = new BreakpadItem(
                     `minidump_stackwalk: ${stackwalkStatus}`,
                     vscode.TreeItemCollapsibleState.None,
-                    undefined,
+                    stackwalkBinaryPath ? {
+                        command: 'minidump-parser.revealToolPath',
+                        title: localization.getUI('clickToOpenInstallFolder'),
+                        arguments: [stackwalkBinaryPath]
+                    } : undefined,
                     'stackwalkStatus'
-                ));
+                );
+                
+                if (stackwalkBinaryPath) {
+                    const swTooltip = new vscode.MarkdownString();
+                    swTooltip.appendMarkdown(`**\u2705 minidump_stackwalk**\n\n`);
+                    swTooltip.appendMarkdown(`---\n\n`);
+                    swTooltip.appendMarkdown(`\uD83D\uDCC2 \`${stackwalkBinaryPath}\`\n\n`);
+                    swTooltip.appendMarkdown(`\uD83D\uDC46 *${localization.getUI('clickToOpenInstallFolder')}*`);
+                    stackwalkItem.tooltip = swTooltip;
+                }
+                
+                items.push(stackwalkItem);
 
                 // Add install button if not found
                 if (stackwalkStatus === localization.getUI('notFound')) {

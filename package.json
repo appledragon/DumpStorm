@@ -2,7 +2,7 @@
   "name": "minidump-parser",
   "displayName": "Minidump Parser",
   "description": "Powerful crash dump analyzer for native applications. Analyze minidump files (.dmp), extract symbols, enhance stack traces, and analyze crashes with register tooltips and multilingual support.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "CuiLiAn",
   "repository": {
     "type": "git",

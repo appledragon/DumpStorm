@@ -401,7 +401,9 @@
     "chooseInstallationMethodStackwalk": "选择 minidump_stackwalk 安装方法",
     "installingStackwalkStandard": "正在安装 minidump_stackwalk（标准方法）...",
     "installingStackwalkAlternative": "正在安装 minidump_stackwalk（替代方法）...",
-    "stackwalkInstallationSuccess": "✅ 正在使用推荐的可靠下载方式..."
+    "stackwalkInstallationSuccess": "✅ 正在使用推荐的可靠下载方式...",
+    "clickToOpenInstallFolder": "点击打开安装目录",
+    "systemPath": "通过系统 PATH 可用"
   },
   "values": {
     "nullPointer": "空指针",

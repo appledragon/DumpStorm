@@ -426,6 +426,13 @@ export function activate(context: vscode.ExtensionContext) {
         await installLlvmNmWithCurl();
     });
 
+    // Register reveal tool path command (click to open install folder)
+    const revealToolPathCommand = vscode.commands.registerCommand('minidump-parser.revealToolPath', (toolPath: string) => {
+        if (toolPath && fs.existsSync(toolPath)) {
+            vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(toolPath));
+        }
+    });
+
     // Register switch dump file command
     const switchDumpFileCommand = vscode.commands.registerCommand('minidump-parser.switchDumpFile', async (filePath: string) => {
         try {
@@ -615,6 +622,7 @@ Stack trace:
         installStackwalkCommand,
         installLlvmNmCommand,
         installLlvmNmCurlCommand,
+        revealToolPathCommand,
         switchDumpFileCommand,
         closeSingleDumpFileCommand,
         closeAllDumpFilesCommand,
