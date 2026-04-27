@@ -30,14 +30,15 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
             const outputFile = path.join(symbolPath, `${binaryName}_nm.txt`);
             
             // Log the exact command being executed for debugging
+            // -S adds the symbol size column (when available); -C demangles C++ names.
             console.log(`Executing ${nmCommand} for symbol extraction:`);
             console.log(`  Input file: ${binaryPath}`);
             console.log(`  Output file: ${outputFile}`);
-            console.log(`  Command: ${nmCommand} -C "${binaryPath}"`);
+            console.log(`  Command: ${nmCommand} -S -C "${binaryPath}"`);
 
             return new Promise<void>((resolve, reject) => {
                 // Use async execFile to avoid blocking the UI thread
-                execFile(nmCommand, ['-C', binaryPath], { 
+                execFile(nmCommand, ['-S', '-C', binaryPath], { 
                     encoding: 'utf8',
                     maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
                 }, (error, nmOutput, stderr) => {
@@ -129,8 +130,9 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
                     console.log(`Batch processing: ${nmCommand} for ${binaryPath}`);
 
                     // Use async execFile to avoid blocking the UI thread
+                    // -S adds the symbol size column (when available); -C demangles C++ names.
                     const nmOutput = await new Promise<string>((resolveNm, rejectNm) => {
-                        execFile(nmCommand, ['-C', binaryPath], { 
+                        execFile(nmCommand, ['-S', '-C', binaryPath], { 
                             encoding: 'utf8',
                             maxBuffer: 200 * 1024 * 1024 // 200MB buffer for large symbol tables
                         }, (err, stdout) => {

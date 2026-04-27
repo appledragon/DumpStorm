@@ -105,6 +105,11 @@
         "icon": "$(symbol-class)"
       },
       {
+        "command": "minidump-parser.extractBreakpadSymbols",
+        "title": "Extract Breakpad Symbols (dump_syms)",
+        "icon": "$(symbol-namespace)"
+      },
+      {
         "command": "minidump-parser.enhanceStackTrace",
         "title": "Enhance Stack Trace",
         "icon": "$(sparkle)"
@@ -209,6 +214,19 @@
         "minidump-parser.customLlvmNmPath": {
           "type": "string",
           "description": "Custom path to llvm-nm executable (leave empty to use system default)"
+        },
+        "minidump-parser.customDumpSymsPath": {
+          "type": "string",
+          "description": "Custom path to Breakpad dump_syms executable (leave empty to use system PATH)"
+        },
+        "minidump-parser.customLlvmUndnamePath": {
+          "type": "string",
+          "description": "Custom path to llvm-undname executable for MSVC C++ demangling (leave empty to use system PATH)"
+        },
+        "minidump-parser.showStackScanFrames": {
+          "type": "boolean",
+          "default": false,
+          "description": "When false, contiguous low-confidence (stack-scanning) frames in the crashing thread are folded into a single summary line. Enable to show every frame regardless of confidence."
         },
         "minidump-parser.language": {
           "type": "string",

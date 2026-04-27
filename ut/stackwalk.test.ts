@@ -1,5 +1,9 @@
 // vscode is mocked globally via jest.config.js moduleNameMapper
-import { cleanStackwalkOutput } from '../src/analysis/stackwalk';
+import { cleanStackwalkOutput, buildSymbolMatchReport } from '../src/analysis/stackwalk';
+import { parseMachineFormat } from '../src/analysis/machine-format';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 describe('cleanStackwalkOutput', () => {
 
@@ -277,7 +281,10 @@ Thread 0 (crashed)
 
       const result = cleanStackwalkOutput(stdout, '');
       expect(result).toContain('Found by: given as instruction pointer in context');
-      expect(result).toContain('Found by: stack scanning');
+      // The trailing "Found by: stack scanning" line is consumed by the
+      // low-confidence fold in the crashing thread; verify the fold summary
+      // takes its place so users still see the frame was discarded.
+      expect(result).toMatch(/low-confidence frame.* hidden/);
     });
 
     it('should keep register value lines', () => {
@@ -290,5 +297,118 @@ Thread 0 (crashed)
       expect(result).toContain('eax = 0x00000000');
       expect(result).toContain('ecx = 0xdeadbeef');
     });
+  });
+
+  describe('low-confidence frame folding', () => {
+    it('should fold contiguous stack-scanning frames in the crashing thread', () => {
+      const stdout = `Crash reason: SIGSEGV
+Crash address: 0x0
+Operating system: Linux
+CPU: amd64
+Process uptime: 1 second
+Thread 0 (crashed)
+ 0  app + 0x100
+    Found by: given as instruction pointer in context
+ 1  app + 0x200
+    Found by: stack scanning
+ 2  app + 0x300
+    Found by: stack scanning
+ 3  app + 0x400
+    Found by: stack scanning
+ 4  app + 0x500
+    Found by: call frame info`;
+      const result = cleanStackwalkOutput(stdout, '');
+      // Folded summary line replaces three contiguous low-confidence frames
+      expect(result).toMatch(/3 low-confidence frames hidden/);
+      // High-confidence frames around the run remain visible
+      expect(result).toContain('0  app + 0x100');
+      expect(result).toContain('4  app + 0x500');
+    });
+
+    it('should not fold low-confidence frames in non-crashed threads', () => {
+      const stdout = `Crash reason: SIGSEGV
+Crash address: 0x0
+Operating system: Linux
+CPU: amd64
+Process uptime: 1 second
+Thread 0 (crashed)
+ 0  app + 0x100
+    Found by: given as instruction pointer in context
+Thread 1
+ 0  worker + 0x100
+    Found by: stack scanning
+ 1  worker + 0x200
+    Found by: stack scanning`;
+      const result = cleanStackwalkOutput(stdout, '');
+      // Non-crashed thread frames should pass through untouched
+      expect(result).not.toMatch(/low-confidence frames hidden/);
+      expect(result).toContain('0  worker + 0x100');
+      expect(result).toContain('1  worker + 0x200');
+    });
+  });
+});
+
+describe('buildSymbolMatchReport', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dumpstorm-symmatch-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function writeSym(moduleName: string, debugId: string): void {
+    const dir = path.join(tmpRoot, moduleName, debugId);
+    fs.mkdirSync(dir, { recursive: true });
+    const baseName = moduleName.replace(/\.(pdb|exe|dll)$/i, '');
+    fs.writeFileSync(path.join(dir, `${baseName}.sym`), 'MODULE windows x86_64 ' + debugId + ' ' + moduleName + '\n');
+  }
+
+  it('should report matched, missing, and version-mismatched modules', () => {
+    writeSym('app.exe', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
+    writeSym('libfoo.dll', 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB1'); // wrong id stored
+
+    const machineDump = parseMachineFormat(`Module|app.exe|1.0|app.pdb|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1|0x400000|0x500000|1
+Module|libfoo.dll|1.0|libfoo.pdb|CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1|0x600000|0x700000|0
+Module|missing.dll|1.0|missing.pdb|DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD1|0x800000|0x900000|0
+`);
+
+    const report = buildSymbolMatchReport(machineDump, tmpRoot, 'app.exe');
+    expect(report.matched).toBe(1);
+    expect(report.totalModules).toBe(3);
+    expect(report.crashingModuleHasSymbols).toBe(true);
+    expect(report.mismatched.map(m => m.name)).toEqual(['libfoo.dll']);
+    expect(report.mismatched[0].foundIds).toEqual(['BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB1']);
+    expect(report.mismatched[0].expected).toBe('CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1');
+    expect(report.missing).toEqual(['missing.dll']);
+  });
+
+  it('should flag the crashing module when its symbols are missing', () => {
+    const machineDump = parseMachineFormat(`Module|app.exe|1.0|app.pdb|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1|0x400000|0x500000|1
+`);
+    const report = buildSymbolMatchReport(machineDump, tmpRoot, 'app.exe');
+    expect(report.matched).toBe(0);
+    expect(report.crashingModuleHasSymbols).toBe(false);
+    expect(report.missing).toEqual(['app.exe']);
+  });
+
+  it('should render Symbol Match line in cleaned output when context is provided', () => {
+    writeSym('app.exe', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
+    const machineDump = parseMachineFormat(`Module|app.exe|1.0|app.pdb|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1|0x400000|0x500000|1
+Module|libfoo.dll|1.0|libfoo.pdb|CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1|0x600000|0x700000|0
+`);
+    const stdout = `Operating system: Windows NT
+CPU: amd64
+Crash reason: EXCEPTION_ACCESS_VIOLATION_READ
+Crash address: 0x0
+Process uptime: 1 second
+Thread 0 (crashed)
+ 0  app.exe + 0x100
+    Found by: given as instruction pointer in context`;
+    const cleaned = cleanStackwalkOutput(stdout, '', { machineDump, symbolPath: tmpRoot });
+    expect(cleaned).toMatch(/Symbol Match\s*:\s*1\/2 modules have matching \.sym/);
+    expect(cleaned).toContain('1 missing');
   });
 });

@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { buildModuleBaseMap, MachineDump, modulesWithResolvedFrames } from '../analysis/machine-format';
+import { demangleMsvcNames, isMsvcMangled } from './msvc-demangle';
 
 // Shared output channel for extension logging
 let _outputChannel: vscode.OutputChannel | undefined;
@@ -18,6 +20,73 @@ function log(message: string): void {
 interface SortedSymbolEntry {
     address: number;
     name: string;
+    /**
+     * Symbol size in bytes when known (extracted via `nm -S` or Breakpad FUNC records).
+     * When defined, callers should treat `offset >= size` as "address falls outside
+     * this symbol's body" and reject the match instead of returning a wildly off-by-N
+     * function name.
+     */
+    size?: number;
+}
+
+/**
+ * Symbol type characters that represent executable code (text segment).
+ * We deliberately reject data (`D/d/B/b/R/r`), undefined (`U/u`), absolute
+ * (`A/a`), and debug (`N`) symbols because mapping a code address to a data
+ * symbol is always wrong (the symbol just happens to live at the next lower
+ * address). Weak symbols (`W/w`) and weak object code (`V/v`) are accepted
+ * since they can legitimately back a function call site.
+ */
+const CODE_SYMBOL_TYPES = new Set(['T', 't', 'W', 'w', 'V', 'v']);
+
+/**
+ * Parse a single nm output line into a symbol entry.
+ * Supported shapes (with or without leading `0x`):
+ *   <addr> <type> <name>            (nm without -S)
+ *   <addr> <size> <type> <name>     (nm -S, when size is known)
+ *
+ * Returns null when the line is a header, blank, or refers to a non-code symbol.
+ */
+function parseNmSymbolLine(line: string): SortedSymbolEntry | null {
+    if (!line || line.startsWith('===') || line.startsWith('Generated:') ||
+        line.startsWith('nm command output:') || line.trim() === '') {
+        return null;
+    }
+
+    // Try the size-bearing form first (nm -S): addr [size] type name
+    let m = line.match(/^(?:0x)?([0-9a-fA-F]+)\s+(?:0x)?([0-9a-fA-F]+)\s+([a-zA-Z?])\s+(.+)$/);
+    if (m) {
+        const [, addressStr, sizeStr, type, symbolName] = m;
+        if (!CODE_SYMBOL_TYPES.has(type)) {
+            return null;
+        }
+        const address = parseInt(addressStr, 16);
+        const size = parseInt(sizeStr, 16);
+        if (Number.isNaN(address)) {
+            return null;
+        }
+        return {
+            address,
+            name: symbolName.trim(),
+            size: Number.isNaN(size) || size === 0 ? undefined : size,
+        };
+    }
+
+    // Fall back to the size-less form: addr type name
+    m = line.match(/^(?:0x)?([0-9a-fA-F]+)\s+([a-zA-Z?])\s+(.+)$/);
+    if (m) {
+        const [, addressStr, type, symbolName] = m;
+        if (!CODE_SYMBOL_TYPES.has(type)) {
+            return null;
+        }
+        const address = parseInt(addressStr, 16);
+        if (Number.isNaN(address)) {
+            return null;
+        }
+        return { address, name: symbolName.trim() };
+    }
+
+    return null;
 }
 
 // Symbol table cache with LRU eviction and pre-sorted arrays
@@ -33,22 +102,19 @@ class SymbolTableCache {
             this.accessOrder.push(filePath);
             return this.cache.get(filePath)!.table;
         }
-        
-        const symbolTable = await this.loadSymbolTable(filePath);
-        if (symbolTable) {
+
+        const loaded = await this.loadSymbolTableWithSize(filePath);
+        if (loaded) {
             // Evict LRU entry if at capacity
             if (this.cache.size >= this.maxCacheSize && this.accessOrder.length > 0) {
                 const lruKey = this.accessOrder.shift()!;
                 this.cache.delete(lruKey);
             }
-            // Pre-sort entries for binary search
-            const sorted = Array.from(symbolTable.entries())
-                .sort((a, b) => a[0] - b[0])
-                .map(([address, name]) => ({ address, name }));
-            this.cache.set(filePath, { table: symbolTable, sorted });
+            this.cache.set(filePath, loaded);
             this.accessOrder.push(filePath);
+            return loaded.table;
         }
-        return symbolTable;
+        return null;
     }
 
     getSorted(filePath: string): SortedSymbolEntry[] | null {
@@ -65,26 +131,75 @@ class SymbolTableCache {
             return null;
         }
     }
+
+    /**
+     * Read the nm output once and produce both the legacy Map and a sorted
+     * array carrying optional size information. Sharing the parse pass keeps
+     * the table and sorted view in lock-step.
+     */
+    private async loadSymbolTableWithSize(nmFilePath: string): Promise<{ table: Map<number, string>; sorted: SortedSymbolEntry[] } | null> {
+        try {
+            const content = await fs.promises.readFile(nmFilePath, 'utf8');
+            const sorted = this.parseSortedSymbols(content);
+
+            // MSVC mangled names ('?...') survive `nm -C` untouched. Run a
+            // best-effort batch demangle through llvm-undname so stack frames
+            // show readable C++ identifiers instead of opaque mangling.
+            const mangled = sorted.filter(e => isMsvcMangled(e.name)).map(e => e.name);
+            if (mangled.length > 0) {
+                const demangled = await demangleMsvcNames(mangled);
+                if (demangled.size > 0) {
+                    for (const entry of sorted) {
+                        const replacement = demangled.get(entry.name);
+                        if (replacement) {
+                            entry.name = replacement;
+                        }
+                    }
+                }
+            }
+
+            const table = new Map<number, string>();
+            for (const entry of sorted) {
+                table.set(entry.address, entry.name);
+            }
+            return { table, sorted };
+        } catch (error) {
+            log(`Error loading symbol table from ${nmFilePath}: ${error}`);
+            return null;
+        }
+    }
     
     private parseSymbolTable(content: string): Map<number, string> {
         const symbolTable = new Map<number, string>();
         const lines = content.split('\n');
-        
+
         for (const line of lines) {
-            if (line.startsWith('===') || line.startsWith('Generated:') || 
-                line.startsWith('nm command output:') || line.trim() === '') {
-                continue;
-            }
-            
-            const match = line.match(/^(0x)?([0-9a-fA-F]+)\s+([a-zA-Z])\s+(.+)$/);
-            if (match) {
-                const [, , addressStr, , symbolName] = match;
-                const address = parseInt(addressStr, 16);
-                symbolTable.set(address, symbolName);
+            const entry = parseNmSymbolLine(line);
+            if (entry) {
+                symbolTable.set(entry.address, entry.name);
             }
         }
-        
+
         return symbolTable;
+    }
+
+    /**
+     * Like {@link parseSymbolTable} but also retains size information for
+     * boundary-aware lookups. Returns a sorted array suitable for binary search.
+     */
+    private parseSortedSymbols(content: string): SortedSymbolEntry[] {
+        const entries: SortedSymbolEntry[] = [];
+        const lines = content.split('\n');
+
+        for (const line of lines) {
+            const entry = parseNmSymbolLine(line);
+            if (entry) {
+                entries.push(entry);
+            }
+        }
+
+        entries.sort((a, b) => a.address - b.address);
+        return entries;
     }
     
     clear(): void {
@@ -165,22 +280,35 @@ export function parseModuleBaseAddresses(stackTraceOutput: string): Map<string, 
     return moduleBaseAddresses;
 }
 
-export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, symbolPath: string): Promise<string> {
+export async function enhanceStackTraceWithSymbols(
+    stackTraceOutput: string,
+    symbolPath: string,
+    machineDump?: MachineDump,
+): Promise<string> {
     if (!fs.existsSync(symbolPath)) {
         return stackTraceOutput; // Return original if no symbol path
     }
-    
+
     // Look for nm symbol files in the symbol path
     const nmFiles = fs.readdirSync(symbolPath).filter(file => file.endsWith('_nm.txt'));
     if (nmFiles.length === 0) {
         return stackTraceOutput; // No nm files found
     }
-    
+
     log(`Found ${nmFiles.length} nm symbol files for enhancement`);
-    
-    // Parse module base addresses from the stack trace output
-    const moduleBaseAddresses = parseModuleBaseAddresses(stackTraceOutput);
-    log(`Parsed ${moduleBaseAddresses.size} module base addresses`);
+
+    // Prefer the authoritative module base map from the -m machine output;
+    // fall back to scraping the human-readable "Loaded modules:" section only
+    // when the machine dump is unavailable.
+    const moduleBaseAddresses = machineDump
+        ? buildModuleBaseMap(machineDump.modules)
+        : parseModuleBaseAddresses(stackTraceOutput);
+    log(`Module base addresses: ${moduleBaseAddresses.size} (source: ${machineDump ? 'machine -m' : 'text scrape'})`);
+
+    // Modules that already have a function name resolved by stackwalk (i.e.
+    // a Breakpad .sym was matched) should not get a second nm-based hint
+    // appended; doing so risks contradicting the more accurate result.
+    const alreadyResolved = machineDump ? modulesWithResolvedFrames(machineDump.frames) : new Set<string>();
     
     // Load all symbol tables using cache
     const symbolTables = new Map<string, Map<number, string>>();
@@ -213,9 +341,18 @@ export async function enhanceStackTraceWithSymbols(stackTraceOutput: string, sym
         if (offsetMatch) {
             const [, libName, offsetStr] = offsetMatch;
             const offset = parseInt(offsetStr, 16);
-            
+
             // Try to find the library in our symbol tables
             const baseLibName = getLibraryBaseName(libName);
+
+            // Skip nm enhancement when stackwalk has already produced a function
+            // name from a matching .sym for this module — adding a (possibly
+            // stale) nm hint on top would only confuse the reader.
+            if (alreadyResolved.has(libName.toLowerCase()) || alreadyResolved.has(baseLibName.toLowerCase())) {
+                enhancedLines.push(enhancedLine);
+                continue;
+            }
+
             const symbolTable = symbolTables.get(baseLibName) || symbolTables.get(libName);
             
             if (symbolTable) {
@@ -306,32 +443,21 @@ export function getCacheStats(): { size: number; maxSize: number } {
 
 export function loadSymbolTable(nmFilePath: string): Map<number, string> {
     const symbolTable = new Map<number, string>();
-    
+
     try {
         const content = fs.readFileSync(nmFilePath, 'utf8');
         const lines = content.split('\n');
-        
+
         for (const line of lines) {
-            // Skip header lines and empty lines
-            if (line.startsWith('===') || line.startsWith('Generated:') || 
-                line.startsWith('nm command output:') || line.trim() === '') {
-                continue;
-            }
-            
-            // Parse lines in nm format, supporting both with and without 0x prefix:
-            // "0000000000001234 T function_name" (nm raw format)
-            // "0x0000000000001234 T function_name" (prefixed format)
-            const match = line.match(/^(0x)?([0-9a-fA-F]+)\s+([a-zA-Z])\s+(.+)$/);
-            if (match) {
-                const [, prefix, addressStr, symbolType, symbolName] = match;
-                const address = parseInt(addressStr, 16);
-                symbolTable.set(address, symbolName);
+            const entry = parseNmSymbolLine(line);
+            if (entry) {
+                symbolTable.set(entry.address, entry.name);
             }
         }
     } catch (error) {
         log(`Error loading symbol table from ${nmFilePath}: ${error}`);
     }
-    
+
     return symbolTable;
 }
 
@@ -370,15 +496,24 @@ function findNearestSymbolSorted(sortedAddresses: SortedSymbolEntry[] | null, ta
     
     const nearest = sortedAddresses[nearestIndex];
     const offset = searchAddress - nearest.address;
-    
-    // Don't show symbols that are too far away (likely wrong match)
-    if (offset > 0x10000) { // 64KB threshold
+
+    // Hard boundary when the symbol size is known: an offset beyond the
+    // symbol body cannot belong to that symbol. Returning null lets the
+    // caller report the raw module+offset rather than a misleading function
+    // name from the previous symbol in memory.
+    if (nearest.size !== undefined && offset >= nearest.size) {
+        return null;
+    }
+
+    // Don't show symbols that are too far away (likely wrong match) when we
+    // have no size information to make a hard call.
+    if (nearest.size === undefined && offset > 0x10000) { // 64KB threshold
         if (offset <= 0x50000) { // 320KB relaxed threshold
             return `${nearest.name}+0x${offset.toString(16)} [far]`;
         }
         return null;
     }
-    
+
     if (offset === 0) {
         return nearest.name;
     } else {

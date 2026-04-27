@@ -88,7 +88,7 @@ Thread 0 (crashed)
       fs.readFileSync = originalReadFileSync;
     });
 
-    it('should parse nm format output', () => {
+    it('should parse nm format output and keep only code symbols', () => {
       fs.readFileSync = jest.fn().mockReturnValue(
         `=== SYMBOLS FOR test ===
 Generated: 2025-01-01T00:00:00Z
@@ -96,13 +96,44 @@ nm command output:
 
 0000000000001000 T main
 0000000000002000 T helper_function
-0000000000003000 D global_var`
+0000000000003000 D global_var
+0000000000004000 B uninit_var
+0000000000005000 U external_ref`
       );
 
       const table = loadSymbolTable('/fake/path.txt');
       expect(table.get(0x1000)).toBe('main');
       expect(table.get(0x2000)).toBe('helper_function');
-      expect(table.get(0x3000)).toBe('global_var');
+      // Data, BSS, and undefined symbols are filtered out (cannot back a code address)
+      expect(table.has(0x3000)).toBe(false);
+      expect(table.has(0x4000)).toBe(false);
+      expect(table.has(0x5000)).toBe(false);
+    });
+
+    it('should accept weak symbols (W/w) as code symbols', () => {
+      fs.readFileSync = jest.fn().mockReturnValue(
+        `0000000000006000 W weak_func
+0000000000007000 w weak_local`
+      );
+
+      const table = loadSymbolTable('/fake/path.txt');
+      expect(table.get(0x6000)).toBe('weak_func');
+      expect(table.get(0x7000)).toBe('weak_local');
+    });
+
+    it('should parse the nm -S size column when present', () => {
+      fs.readFileSync = jest.fn().mockReturnValue(
+        // addr  size  type  name
+        `0000000000001000 0000000000000040 T short_func
+0000000000002000 0000000000000200 T longer_func`
+      );
+
+      // Standalone loadSymbolTable returns Map<addr, name>; size is recorded
+      // separately by the cache-backed path. Just verify the addresses and
+      // names parse cleanly when the size column is present.
+      const table = loadSymbolTable('/fake/path.txt');
+      expect(table.get(0x1000)).toBe('short_func');
+      expect(table.get(0x2000)).toBe('longer_func');
     });
 
     it('should handle 0x prefixed addresses', () => {

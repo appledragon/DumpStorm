@@ -3,10 +3,11 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { execFile, execSync } from 'child_process';
-import { MINIDUMP_STACKWALK_CONFIG, getDownloadUrl, getBinaryName, getCustomMinidumpStackwalkPath, isValidMinidumpStackwalkPath } from '../config/config';
+import { MINIDUMP_STACKWALK_CONFIG, getCustomMinidumpStackwalkPath, getDownloadUrl, getBinaryName, getShowStackScanFrames, isValidMinidumpStackwalkPath } from '../config/config';
 import { installMinidumpStackwalk } from '../tools/minidump-stackwalk-installer';
 import { enhanceStackTraceWithSymbols } from '../symbols/enhancer';
 import { localization } from '../localization/localization';
+import { MachineDump, parseMachineFormat } from './machine-format';
 
 export async function getBinaryPath(context: vscode.ExtensionContext): Promise<string> {
     // First check if user has specified a custom minidump_stackwalk path
@@ -93,45 +94,67 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
     console.log(`  Command: ${exe} "${dumpPath}" "${symbolPath}"`);
 
     return new Promise<string>((resolve, reject) => {
-        execFile(exe, [dumpPath, symbolPath], async (err: Error | null, stdout: string, stderr: string) => {
-            // Always log stderr for debugging
-            if (stderr && stderr.trim().length > 0) {
-                console.log(`minidump_stackwalk stderr: ${stderr}`);
+        // First pass: pipe-separated machine format. Stable across Breakpad
+        // releases and gives us module debug_ids, base addresses, and per-frame
+        // function/source info — the foundation for accurate enhancement and
+        // build-id verification.
+        execFile(exe, ['-m', dumpPath, symbolPath], { maxBuffer: 200 * 1024 * 1024 },
+            (mErr: Error | null, mStdout: string) => {
+            const machineDump: MachineDump | null = mErr || !mStdout
+                ? null
+                : parseMachineFormat(mStdout);
+            if (mErr) {
+                console.log(`minidump_stackwalk -m pre-pass failed (continuing without machine data): ${mErr.message}`);
+            } else if (machineDump) {
+                console.log(`minidump_stackwalk -m parsed: ${machineDump.modules.length} modules, ` +
+                    `${machineDump.frames.length} frames, crashed thread=${machineDump.crashingThread}`);
             }
-            
-            // Check if we have valid output first, regardless of exit code
-            if (stdout && stdout.trim().length > 0) {
-                // We have output, so the tool worked - clean it up for display
-                console.log(`minidump_stackwalk produced output (${stdout.length} characters)`);
-                
-                // Clean up the output by separating debug info from actual crash data
-                const cleanOutput = cleanStackwalkOutput(stdout, stderr);
-                
-                // Try to enhance with symbols if available
-                try {
-                    const enhancedOutput = await enhanceStackTraceWithSymbols(cleanOutput, symbolPath);
-                    resolve(enhancedOutput);
-                } catch (enhanceError: any) {
-                    console.log(`Symbol enhancement failed (proceeding with basic output): ${enhanceError.message}`);
-                    resolve(cleanOutput);
+
+            // Second pass: human-readable output. We keep this as the user-
+            // facing format and overlay the machine data on top.
+            execFile(exe, [dumpPath, symbolPath], async (err: Error | null, stdout: string, stderr: string) => {
+                // Always log stderr for debugging
+                if (stderr && stderr.trim().length > 0) {
+                    console.log(`minidump_stackwalk stderr: ${stderr}`);
                 }
-            } else if (err) {
-                // No output and there was an error
-                console.error(`minidump_stackwalk error: ${err.message}`);
-                
-                if (err.message.includes('ENOENT') || err.message.includes('command not found')) {
-                    reject(new Error('minidump_stackwalk tool not found. Please install breakpad tools.'));
-                } else if (err.message.includes('Invalid dump file') || stderr.includes('Invalid dump file')) {
-                    reject(new Error('Invalid or corrupted dump file format.'));
-                } else if (err.message.includes('Permission denied')) {
-                    reject(new Error('Permission denied. Check file permissions for the dump file or binary.'));
+
+                // Check if we have valid output first, regardless of exit code
+                if (stdout && stdout.trim().length > 0) {
+                    // We have output, so the tool worked - clean it up for display
+                    console.log(`minidump_stackwalk produced output (${stdout.length} characters)`);
+
+                    // Clean up the output by separating debug info from actual crash data
+                    const cleanOutput = cleanStackwalkOutput(stdout, stderr, {
+                        machineDump,
+                        symbolPath,
+                    });
+
+                    // Try to enhance with symbols if available
+                    try {
+                        const enhancedOutput = await enhanceStackTraceWithSymbols(cleanOutput, symbolPath, machineDump ?? undefined);
+                        resolve(enhancedOutput);
+                    } catch (enhanceError: any) {
+                        console.log(`Symbol enhancement failed (proceeding with basic output): ${enhanceError.message}`);
+                        resolve(cleanOutput);
+                    }
+                } else if (err) {
+                    // No output and there was an error
+                    console.error(`minidump_stackwalk error: ${err.message}`);
+
+                    if (err.message.includes('ENOENT') || err.message.includes('command not found')) {
+                        reject(new Error('minidump_stackwalk tool not found. Please install breakpad tools.'));
+                    } else if (err.message.includes('Invalid dump file') || stderr.includes('Invalid dump file')) {
+                        reject(new Error('Invalid or corrupted dump file format.'));
+                    } else if (err.message.includes('Permission denied')) {
+                        reject(new Error('Permission denied. Check file permissions for the dump file or binary.'));
+                    } else {
+                        reject(new Error(`minidump_stackwalk execution failed: ${err.message}\n\nStderr: ${stderr}`));
+                    }
                 } else {
-                    reject(new Error(`minidump_stackwalk execution failed: ${err.message}\n\nStderr: ${stderr}`));
+                    // No output but no error either - this might be an empty dump or other issue
+                    resolve('No stack trace data found in the dump file. The dump might be empty or corrupted.');
                 }
-            } else {
-                // No output but no error either - this might be an empty dump or other issue
-                resolve('No stack trace data found in the dump file. The dump might be empty or corrupted.');
-            }
+            });
         });
     });
 }
@@ -206,6 +229,32 @@ export interface CrashSummary {
     stackScanFrameCount: number;
     /** Total number of stack frames */
     totalFrameCount: number;
+    /**
+     * Optional symbol-match diagnostics, populated when the caller passes a
+     * parsed -m machine dump and the symbol directory to {@link cleanStackwalkOutput}.
+     */
+    symbolMatch?: SymbolMatchReport;
+}
+
+/**
+ * Per-module symbol availability report. Generated by comparing each module
+ * (name, debug_id) in the minidump against `<symbolPath>/<name>/<id>/<name>.sym`.
+ */
+export interface SymbolMatchReport {
+    /** Number of modules that have a matching .sym file. */
+    matched: number;
+    /** Total number of modules in the dump. */
+    totalModules: number;
+    /** Modules with no .sym at all (under the expected path). */
+    missing: string[];
+    /**
+     * Modules whose name has at least one .sym on disk but with a different
+     * debug_id — strong indicator that the symbol file came from a different
+     * build of the same binary.
+     */
+    mismatched: { name: string; expected: string; foundIds: string[] }[];
+    /** True if the crashing module specifically lacks a matching .sym. */
+    crashingModuleHasSymbols: boolean;
 }
 
 /**
@@ -299,6 +348,80 @@ export function parseCrashSummary(output: string): CrashSummary {
 }
 
 /**
+ * Fold contiguous low-confidence stack-scanning frames within the crashing
+ * thread into a single summary line. Only the crashing thread is affected —
+ * non-crashed threads keep their full frame list because they are usually
+ * skimmed by humans, not analyzed in depth.
+ *
+ * The filter recognises a frame line by the `[confidence: LOW - stack scanning`
+ * marker that {@link cleanStackwalkOutput} appends in its first pass. Other
+ * frames (CFI, frame pointer, context) and surrounding metadata pass through
+ * unchanged.
+ */
+function foldStackScanFrames(text: string): string {
+    const lines = text.split('\n');
+    const out: string[] = [];
+    let inCrashedThread = false;
+    let runCount = 0;
+
+    const flushRun = () => {
+        if (runCount > 0) {
+            out.push(
+                `   ?? [${runCount} low-confidence frame${runCount > 1 ? 's' : ''} hidden — found by stack scanning;` +
+                ` enable "minidump-parser.showStackScanFrames" to expand]`
+            );
+        }
+        runCount = 0;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Track which thread block we're in so we only fold inside the crashing one.
+        if (trimmed.startsWith('Thread')) {
+            flushRun();
+            inCrashedThread = trimmed.includes('crashed');
+            out.push(line);
+            continue;
+        }
+
+        const isStackScanFrame = inCrashedThread &&
+            /^\d+\s+/.test(trimmed) &&
+            line.includes('[confidence: LOW - stack scanning');
+
+        if (isStackScanFrame) {
+            runCount++;
+            // Consume the multi-line annotation block that follows this frame
+            // (registers, "Found by:", source ref, etc.) so the fold keeps
+            // contiguous low-confidence frames merged into one summary line.
+            // The annotation block ends at the next frame number, the next
+            // Thread header, or a blank line.
+            while (i + 1 < lines.length) {
+                const nextTrim = lines[i + 1].trim();
+                if (nextTrim === '' || nextTrim.startsWith('Thread') || /^\d+\s+/.test(nextTrim)) {
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        // A blank line inside a run is harmless padding — keep folding.
+        if (runCount > 0 && trimmed === '') {
+            continue;
+        }
+
+        // Any non-fold line breaks the run.
+        flushRun();
+        out.push(line);
+    }
+    flushRun();
+
+    return out.join('\n');
+}
+
+/**
  * Format a crash summary block to prepend to the output.
  */
 function formatCrashSummaryBlock(summary: CrashSummary): string {
@@ -344,12 +467,130 @@ function formatCrashSummaryBlock(summary: CrashSummary): string {
         lines.push(`Stack Quality : ${quality} (${summary.stackScanFrameCount}/${summary.totalFrameCount} frames from stack scanning)${qualityNote}`);
     }
 
+    // Symbol match diagnostics. We surface mismatched modules first because
+    // wrong-version symbols silently corrupt every other piece of analysis.
+    if (summary.symbolMatch && summary.symbolMatch.totalModules > 0) {
+        const sm = summary.symbolMatch;
+        const detail: string[] = [];
+        if (sm.mismatched.length > 0) {
+            detail.push(`${sm.mismatched.length} version mismatched ⚠`);
+        }
+        if (sm.missing.length > 0) {
+            detail.push(`${sm.missing.length} missing`);
+        }
+        const detailStr = detail.length > 0 ? ` (${detail.join(', ')})` : '';
+        lines.push(`Symbol Match  : ${sm.matched}/${sm.totalModules} modules have matching .sym${detailStr}`);
+        for (const m of sm.mismatched.slice(0, 3)) {
+            lines.push(`  ⚠ ${m.name}: dump expects debug_id ${m.expected}, found [${m.foundIds.join(', ')}]`);
+        }
+        if (sm.mismatched.length > 3) {
+            lines.push(`  … and ${sm.mismatched.length - 3} more mismatched modules`);
+        }
+        if (summary.crashingModule && !sm.crashingModuleHasSymbols) {
+            lines.push(`  ⚠ Crashing module "${summary.crashingModule}" has no matching symbols — stack frames may be inaccurate.`);
+        }
+    }
+
     lines.push('='.repeat(50));
     lines.push('');
     return lines.join('\n');
 }
 
-export function cleanStackwalkOutput(stdout: string, stderr: string): string {
+/**
+ * Inspect `<symbolPath>/<module>/<debug_id>/<module>.sym` for each module in
+ * the parsed minidump and report which ones match, which are missing, and
+ * which have a different debug_id (wrong-build symbol files).
+ */
+export function buildSymbolMatchReport(
+    machineDump: MachineDump,
+    symbolPath: string,
+    crashingModuleName: string,
+): SymbolMatchReport {
+    const report: SymbolMatchReport = {
+        matched: 0,
+        totalModules: machineDump.modules.length,
+        missing: [],
+        mismatched: [],
+        crashingModuleHasSymbols: false,
+    };
+
+    if (!symbolPath || machineDump.modules.length === 0) {
+        return report;
+    }
+
+    let symbolsRootExists = false;
+    try {
+        symbolsRootExists = fs.existsSync(symbolPath) && fs.statSync(symbolPath).isDirectory();
+    } catch {
+        symbolsRootExists = false;
+    }
+    if (!symbolsRootExists) {
+        return report;
+    }
+
+    const crashingNorm = (crashingModuleName || '').toLowerCase().split(/[!\\/]/)[0];
+
+    for (const mod of machineDump.modules) {
+        if (!mod.name) {
+            continue;
+        }
+        const moduleDir = path.join(symbolPath, mod.name);
+        let foundIds: string[] = [];
+        try {
+            if (fs.existsSync(moduleDir) && fs.statSync(moduleDir).isDirectory()) {
+                foundIds = fs.readdirSync(moduleDir).filter(entry => {
+                    try {
+                        return fs.statSync(path.join(moduleDir, entry)).isDirectory();
+                    } catch {
+                        return false;
+                    }
+                });
+            }
+        } catch {
+            // ignore I/O errors; treat as missing
+        }
+
+        const expectedId = mod.debugId;
+        const expectedSym = expectedId
+            ? path.join(moduleDir, expectedId, `${stripSymExt(mod.name)}.sym`)
+            : '';
+        const matched = !!expectedSym && safeExists(expectedSym);
+
+        if (matched) {
+            report.matched++;
+            if (mod.name.toLowerCase() === crashingNorm) {
+                report.crashingModuleHasSymbols = true;
+            }
+        } else if (foundIds.length > 0 && expectedId) {
+            report.mismatched.push({ name: mod.name, expected: expectedId, foundIds });
+        } else {
+            report.missing.push(mod.name);
+        }
+    }
+
+    return report;
+}
+
+function safeExists(p: string): boolean {
+    try {
+        return fs.existsSync(p);
+    } catch {
+        return false;
+    }
+}
+
+/** Drop trailing `.pdb`/`.exe`/`.dll` for the .sym base name (Breakpad convention). */
+function stripSymExt(name: string): string {
+    return name.replace(/\.(pdb|exe|dll)$/i, '');
+}
+
+/** Optional context that callers can supply to enrich the cleaned output. */
+export interface CleanContext {
+    machineDump?: MachineDump | null;
+    symbolPath?: string;
+}
+
+export function cleanStackwalkOutput(stdout: string, stderr: string, context?: CleanContext): string {
     const lines = stdout.split('\n');
     const cleanLines: string[] = [];
     let inCrashSection = false;
@@ -359,6 +600,24 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
     
     // First pass: parse crash summary from raw output
     const summary = parseCrashSummary(stdout);
+
+    // Overlay machine-format data when available: it gives us the authoritative
+    // crashing thread index plus an opportunity to verify symbol freshness.
+    if (context?.machineDump) {
+        const md = context.machineDump;
+        if (md.crashingThread >= 0 && summary.crashingThread < 0) {
+            summary.crashingThread = md.crashingThread;
+        }
+        if (md.crashReason && !summary.crashReason) {
+            summary.crashReason = md.crashReason;
+        }
+        if (md.crashAddress && !summary.crashAddress) {
+            summary.crashAddress = md.crashAddress;
+        }
+        if (context.symbolPath) {
+            summary.symbolMatch = buildSymbolMatchReport(md, context.symbolPath, summary.crashingModule);
+        }
+    }
     
     // Filter out debug/informational lines and keep relevant crash data
     for (let i = 0; i < lines.length; i++) {
@@ -473,7 +732,13 @@ export function cleanStackwalkOutput(stdout: string, stderr: string): string {
     }
     
     let result = cleanLines.join('\n');
-    
+
+    // Fold contiguous low-confidence (stack-scanning) frames within the
+    // crashing thread so users don't read them as a real call chain.
+    if (!getShowStackScanFrames()) {
+        result = foldStackScanFrames(result);
+    }
+
     // Prepend crash summary if we have meaningful info
     if (summary.crashReason || summary.crashAddress || summary.crashingThread >= 0) {
         result = formatCrashSummaryBlock(summary) + result;

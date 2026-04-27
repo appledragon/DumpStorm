@@ -198,6 +198,20 @@ export function getCustomMinidumpStackwalkPath(): string | undefined {
     return getCustomSettingPath('customMinidumpStackwalkPath');
 }
 
+/**
+ * When false (default), contiguous low-confidence stack-scanning frames in the
+ * crashing thread are folded into a single summary line. Users who want the
+ * full unfiltered output can toggle this setting on.
+ */
+export function getShowStackScanFrames(): boolean {
+    try {
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        return config.get<boolean>('showStackScanFrames') ?? false;
+    } catch {
+        return false;
+    }
+}
+
 // Helper function to get custom llvm-nm path from VS Code settings
 export function getCustomLlvmNmPath(): string | undefined {
     return getCustomSettingPath('customLlvmNmPath');

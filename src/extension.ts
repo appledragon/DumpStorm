@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG, isValidLlvmNmPath, isValidMinidumpStackwalkPath, isVali
 import { localization } from './localization/localization';
 import { enhanceStackTraceWithSymbols } from './symbols/enhancer';
 import { extractSymbolsFromBinary, extractSymbolsFromDirectory } from './symbols/extractor';
+import { extractBreakpadSymbols, extractBreakpadSymbolsFromDirectory, isDumpSymsAvailable } from './symbols/breakpad-extractor';
 import { clearSymbolCache } from './symbols/enhancer';
 import { installLlvmNmWithCurl } from './tools/llvm-nm-installer-curl';
 import { BreakpadPanelProvider } from './ui/panel';
@@ -609,11 +610,70 @@ Stack trace:
     });
 
     // Register all commands
+    const extractBreakpadSymbolsCommand = vscode.commands.registerCommand('minidump-parser.extractBreakpadSymbols', async () => {
+        if (!(await isDumpSymsAvailable())) {
+            vscode.window.showErrorMessage(
+                'dump_syms is not available. Install Breakpad\u2019s dump_syms and ensure it is on PATH, ' +
+                'or set "minidump-parser.customDumpSymsPath".',
+            );
+            return;
+        }
+        const choice = await vscode.window.showQuickPick(
+            [
+                { label: 'Single binary', detail: 'Pick one .exe / .dll / .so / .dylib' },
+                { label: 'Directory (recursive)', detail: 'Run dump_syms over every binary under a folder' },
+            ],
+            { title: 'Breakpad symbol extraction', placeHolder: 'Choose extraction mode' },
+        );
+        if (!choice) {
+            return;
+        }
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+        if (!fs.existsSync(symbolPath)) {
+            fs.mkdirSync(symbolPath, { recursive: true });
+        }
+
+        try {
+            if (choice.label === 'Single binary') {
+                const picked = await vscode.window.showOpenDialog({
+                    canSelectMany: false,
+                    filters: { 'Executable Files': ['exe', 'dll', 'so', 'dylib'], 'All Files': ['*'] },
+                    title: 'Select binary for dump_syms',
+                });
+                if (!picked || picked.length === 0) {
+                    return;
+                }
+                const result = await extractBreakpadSymbols(picked[0].fsPath, symbolPath);
+                vscode.window.showInformationMessage(
+                    `Extracted .sym for ${result.moduleName} (${result.debugId.slice(0, 8)}\u2026)`,
+                );
+            } else {
+                const picked = await vscode.window.showOpenDialog({
+                    canSelectFiles: false,
+                    canSelectFolders: true,
+                    canSelectMany: false,
+                    title: 'Select directory to scan with dump_syms',
+                });
+                if (!picked || picked.length === 0) {
+                    return;
+                }
+                const { succeeded, failed } = await extractBreakpadSymbolsFromDirectory(picked[0].fsPath, symbolPath);
+                vscode.window.showInformationMessage(
+                    `dump_syms: ${succeeded.length} succeeded, ${failed.length} failed.`,
+                );
+            }
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`dump_syms failed: ${error?.message ?? error}`);
+        }
+    });
+
     context.subscriptions.push(
         hoverDisposable,
         setSymbolPathCommand,
         openDumpFileCommand,
         extractSymbolsCommand,
+        extractBreakpadSymbolsCommand,
         enhanceStackTraceCommand,
         setCustomMinidumpStackwalkPathCommand,
         setCustomNmPathCommand,
