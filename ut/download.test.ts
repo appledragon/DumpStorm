@@ -72,6 +72,11 @@ describe('Download helpers', () => {
             .toBe('https://cdn.example.com/file');
     });
 
+    it('rejects HTTPS to HTTP redirects', () => {
+        expect(() => resolveDownloadUrl('https://example.com/a', 'http://cdn.example.com/file'))
+            .toThrow(/HTTPS to HTTP/);
+    });
+
     it('rejects when the request exceeds the timeout', async () => {
         const destination = path.join(tempDir, 'timeout.bin');
 

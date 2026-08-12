@@ -20,7 +20,9 @@ import {
   isDynamicLibraryCrossPlatform,
   findDynamicLibraries,
   DEFAULT_CONFIG,
-  DYNAMIC_LIBRARY_EXTENSIONS
+  DYNAMIC_LIBRARY_EXTENSIONS,
+  getDefaultSymbolPath,
+  getSymbolPath
 } from '../src/config/config';
 
 // We need real fs for path validation tests, so we only mock selectively
@@ -115,13 +117,54 @@ describe('Config Module', () => {
 
   describe('DEFAULT_CONFIG', () => {
     it('should have expected defaults', () => {
-      const os = require('os');
-      const path = require('path');
       const expectedSymbolPath = os.platform() === 'win32'
         ? path.join(os.homedir(), '.dumpstorm', 'symbols')
         : '/tmp/symbols';
       expect(DEFAULT_CONFIG.SYMBOL_PATH).toBe(expectedSymbolPath);
       expect(DEFAULT_CONFIG.HOME_SYMBOL_PATH).toBe('symbols');
+    });
+  });
+
+  describe('getSymbolPath', () => {
+    const vscode = require('vscode');
+
+    function mockSymbolPathSetting(value: string | undefined) {
+      vscode.workspace.getConfiguration.mockReturnValue({
+        get: jest.fn((key: string) => key === 'symbolPath' ? value : undefined),
+        update: jest.fn().mockResolvedValue(undefined)
+      });
+    }
+
+    afterEach(() => {
+      vscode.workspace.getConfiguration.mockReturnValue({
+        get: jest.fn().mockReturnValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined)
+      });
+    });
+
+    it('returns a trimmed configured path', () => {
+      mockSymbolPathSetting('  D:\\crash-symbols  ');
+      expect(getSymbolPath()).toBe('D:\\crash-symbols');
+    });
+
+    it('uses ~/.dumpstorm/symbols on Windows when the setting is empty', () => {
+      expect(getDefaultSymbolPath('win32', 'C:\\Users\\test')).toBe(
+        path.join('C:\\Users\\test', '.dumpstorm', 'symbols'),
+      );
+      mockSymbolPathSetting('');
+      expect(getSymbolPath()).toBe(DEFAULT_CONFIG.SYMBOL_PATH);
+    });
+
+    it('uses /tmp/symbols on non-Windows when the setting is unset', () => {
+      expect(getDefaultSymbolPath('linux', '/home/test')).toBe('/tmp/symbols');
+      expect(getDefaultSymbolPath('darwin', '/Users/test')).toBe('/tmp/symbols');
+      mockSymbolPathSetting(undefined);
+      expect(getSymbolPath()).toBe(DEFAULT_CONFIG.SYMBOL_PATH);
+    });
+
+    it('treats whitespace-only settings as empty', () => {
+      mockSymbolPathSetting('   ');
+      expect(getSymbolPath()).toBe(DEFAULT_CONFIG.SYMBOL_PATH);
     });
   });
 

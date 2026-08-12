@@ -306,12 +306,15 @@
     "manualGuideOpened": "手动安装指南已打开。请按照说明操作并在完成后重启 VS Code",
     "languageChanged": "语言已切换为{0}。工具提示现在将使用新语言",
     "languageChangedChinese": "语言已切换为简体中文。工具提示现在将使用中文显示",
+    "languageChangedAuto": "语言已设置为跟随 VS Code 显示语言",
     "languageSwitchError": "切换语言时出错：{0}",
     "chooseLanguage": "选择语言",
     "english": "English",
     "chineseSimplified": "简体中文",
+    "autoLanguage": "自动",
+    "followVsCodeLanguage": "跟随 VS Code 显示语言",
     "nativeEnglishName": "English",
-    "nativeChineseName": "简体中文",
+    "nativeChineseName": "Simplified Chinese",
     "clickToSwitch": "(点击切换)",
     "singleFile": "单文件",
     "singleFileDesc": "从单个二进制文件提取符号",
@@ -461,7 +464,9 @@
     "dumpFileAnalysisPartial": "DUMP 文件分析不完整：{0}。stackwalk 工具报告了严重诊断错误。",
     "dumpFileAnalysisInvalid": "DUMP 文件分析无效：{0}。未生成可用的堆栈帧。",
     "partialAnalysisResult": "stackwalk 报告了严重诊断错误；此结果只能作为部分分析使用。",
-    "invalidAnalysisResult": "未生成可用的堆栈帧；无法可靠分析此 DUMP 文件。"
+    "invalidAnalysisResult": "未生成可用的堆栈帧；无法可靠分析此 DUMP 文件。",
+    "processError": "进程错误：{0}",
+    "stackwalkDiagnostic": "Stackwalk 诊断：{0}"
     ,"downloadingTool": "正在下载 {0} 二进制文件..."
     ,"extractingTool": "正在提取 {0} 二进制文件..."
     ,"installingTool": "正在将 {0} 安装到 .dumpstorm/bin 目录..."

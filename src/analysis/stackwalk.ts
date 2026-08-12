@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { ChildProcess, execFile, execSync } from 'child_process';
+import { ChildProcess, execFile, execFileSync } from 'child_process';
 import { MINIDUMP_STACKWALK_CONFIG, getCustomMinidumpStackwalkPath, getDownloadUrl, getBinaryName, getShowStackScanFrames, isValidMinidumpStackwalkPath } from '../config/config';
 import { installMinidumpStackwalk } from '../tools/minidump-stackwalk-installer';
 import { enhanceStackTraceWithSymbols } from '../symbols/enhancer';
@@ -10,6 +10,8 @@ import { localization } from '../localization/localization';
 import { MachineDump, parseMachineFormat } from './machine-format';
 
 export const STACKWALK_EXEC_TIMEOUT_MS = 120_000;
+export const STACKWALK_TOTAL_TIMEOUT_MS = STACKWALK_EXEC_TIMEOUT_MS * 2;
+export const MAX_SEVERE_DIAGNOSTICS = 20;
 export const ANALYSIS_CANCELLED_CODE = 'ANALYSIS_CANCELLED';
 
 export function createAnalysisCancelledError(): Error & { code: string } {
@@ -59,13 +61,16 @@ const SEVERE_STACKWALK_DIAGNOSTICS: readonly RegExp[] = [
  */
 export function getSevereStackwalkDiagnostics(stderr: string): string[] {
     const diagnostics: string[] = [];
+    const seen = new Set<string>();
     for (const line of (stderr || '').split(/\r?\n/)) {
         const trimmed = line.trim();
-        if (!trimmed || !SEVERE_STACKWALK_DIAGNOSTICS.some(pattern => pattern.test(trimmed))) {
+        if (!trimmed || seen.has(trimmed) || !SEVERE_STACKWALK_DIAGNOSTICS.some(pattern => pattern.test(trimmed))) {
             continue;
         }
-        if (!diagnostics.includes(trimmed)) {
-            diagnostics.push(trimmed);
+        seen.add(trimmed);
+        diagnostics.push(trimmed);
+        if (diagnostics.length >= MAX_SEVERE_DIAGNOSTICS) {
+            break;
         }
     }
     return diagnostics;
@@ -142,10 +147,10 @@ function addStackwalkStatus(
         : 'partialAnalysisResult';
     const lines = [marker, localization.getUI(descriptionKey)];
     if (executionError) {
-        lines.push(`Process error: ${executionError.message}`);
+        lines.push(localization.format(localization.getUI('processError'), executionError.message));
     }
     for (const diagnostic of assessment.severeDiagnostics) {
-        lines.push(`Stackwalk diagnostic: ${diagnostic}`);
+        lines.push(localization.format(localization.getUI('stackwalkDiagnostic'), diagnostic));
     }
     lines.push('', output);
     return lines.join('\n');
@@ -173,7 +178,10 @@ export async function getBinaryPath(context: vscode.ExtensionContext): Promise<s
     // Check system PATH for minidump-stackwalk
     try {
         const whichCommand = platform === 'win32' ? 'where' : 'which';
-        const whichResult = execSync(`${whichCommand} ${binaryName}`, { encoding: 'utf8' }).trim();
+        const whichResult = execFileSync(whichCommand, [binaryName], {
+            encoding: 'utf8',
+            timeout: 5000,
+        }).trim().split(/\r?\n/)[0];
         if (whichResult && fs.existsSync(whichResult)) {
             console.log(`Found minidump-stackwalk in PATH: ${whichResult}`);
             return whichResult;
@@ -190,14 +198,18 @@ export async function getBinaryPath(context: vscode.ExtensionContext): Promise<s
     
     if (response === localization.getUI('autoInstall')) {
         try {
-            await installMinidumpStackwalk();
-            // Check again after installation
+            const installed = await installMinidumpStackwalk();
+            if (!installed) {
+                throw new Error(localization.getUI('userCancelledInstallation'));
+            }
             if (fs.existsSync(dumpstormPath)) {
                 return dumpstormPath;
-            } else {
-                throw new Error(localization.getUI('installationCompletedButNotFound'));
             }
+            throw new Error(localization.getUI('installationCompletedButNotFound'));
         } catch (error) {
+            if (error instanceof Error && error.message === localization.getUI('userCancelledInstallation')) {
+                throw error;
+            }
             throw new Error(localization.format(localization.getUI('installationFailed'), error));
         }
     } else if (response === localization.getUI('manualInstall')) {
@@ -317,8 +329,8 @@ export async function runStackwalk(
             terminate(machineProcess);
             terminate(humanProcess);
             cleanup();
-            reject(new Error(localization.format(localization.getUI('analysisTimedOut'), STACKWALK_EXEC_TIMEOUT_MS)));
-        }, STACKWALK_EXEC_TIMEOUT_MS * 2);
+            reject(new Error(localization.format(localization.getUI('analysisTimedOut'), STACKWALK_TOTAL_TIMEOUT_MS)));
+        }, STACKWALK_TOTAL_TIMEOUT_MS);
 
         // First pass: pipe-separated machine format. Stable across Breakpad
         // releases and gives us module debug_ids, base addresses, and per-frame
@@ -666,7 +678,8 @@ function foldStackScanFrames(text: string): string {
             // Thread header, or a blank line.
             while (i + 1 < lines.length) {
                 const nextTrim = lines[i + 1].trim();
-                if (nextTrim === '' || nextTrim.startsWith('Thread') || /^\d+\s+/.test(nextTrim)) {
+                if (nextTrim === '' || nextTrim.startsWith('Thread') || /^\d+\s+/.test(nextTrim) ||
+                    /^(?:Loaded modules:|Crash reason:|Operating system:|GPU:)/i.test(nextTrim)) {
                     break;
                 }
                 i++;
@@ -801,7 +814,8 @@ export function buildSymbolMatchReport(
         if (!mod.name) {
             continue;
         }
-        const moduleDir = path.join(symbolPath, mod.name);
+        const lookupName = (mod.debugFile || mod.name).trim();
+        const moduleDir = path.join(symbolPath, lookupName);
         let foundIds: string[] = [];
         try {
             if (fs.existsSync(moduleDir) && fs.statSync(moduleDir).isDirectory()) {
@@ -819,7 +833,7 @@ export function buildSymbolMatchReport(
 
         const expectedId = mod.debugId;
         const expectedSym = expectedId
-            ? path.join(moduleDir, expectedId, `${stripSymExt(mod.name)}.sym`)
+            ? path.join(moduleDir, expectedId, `${stripSymExt(lookupName)}.sym`)
             : '';
         const matched = !!expectedSym && safeExists(expectedSym);
 

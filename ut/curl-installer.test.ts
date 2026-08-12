@@ -123,7 +123,7 @@ class TestCurlInstaller extends CurlBaseInstaller {
     binaryInfo: BinaryInfo,
     progress: any,
     resolve: () => void,
-    reject: (error: string) => void,
+    reject: (error: Error) => void,
     token: any
   ): Promise<void> {
     return this.installWithCurl(binaryInfo, progress, resolve, reject, token);
@@ -248,7 +248,9 @@ describe('CurlBaseInstaller', () => {
         mockToken
       );
 
-      expect(mockReject).toHaveBeenCalledWith(expect.stringContaining('curl'));
+      expect(mockReject).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining('curl'),
+      }));
     });
 
     it('should handle cancellation', async () => {
@@ -265,7 +267,10 @@ describe('CurlBaseInstaller', () => {
         mockToken
       );
 
-      expect(mockReject).toHaveBeenCalledWith('Installation cancelled by user');
+      expect(mockReject).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'InstallCancelledError',
+        message: 'Installation cancelled by user',
+      }));
       expect(mockResolve).not.toHaveBeenCalled();
     });
 

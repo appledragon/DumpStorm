@@ -5,6 +5,7 @@ import { RegisterTooltipProvider } from './analysis/registers';
 import { analyzeDumpFile } from './analysis/stackwalk';
 import {
     DEFAULT_CONFIG,
+    getSymbolPath,
     isValidDumpSymsPath,
     isValidLlvmNmPath,
     isValidLlvmUndnamePath,
@@ -107,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Get symbol path from configuration
             const config = vscode.workspace.getConfiguration('minidump-parser');
-            let symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+            let symbolPath = getSymbolPath();
             
             // Check if symbol path exists, if not, ask user to set it
             if (!fs.existsSync(symbolPath)) {
@@ -182,9 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return; // User canceled
             }
 
-            // Get symbol path from configuration  
-            const config = vscode.workspace.getConfiguration('minidump-parser');
-            const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+            const symbolPath = getSymbolPath();
             
             // Ensure symbol path exists
             if (!fs.existsSync(symbolPath)) {
@@ -292,9 +291,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Get symbol path from configuration
-            const config = vscode.workspace.getConfiguration('minidump-parser');
-            const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+            const symbolPath = getSymbolPath();
 
             if (!fs.existsSync(symbolPath)) {
                 vscode.window.showErrorMessage(localization.format(localization.getUI('symbolPathNotExistForEnhance'), symbolPath));
@@ -536,7 +533,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register install llvm-nm with curl command (more reliable)
     const installLlvmNmCurlCommand = vscode.commands.registerCommand('minidump-parser.installLlvmNmCurl', async () => {
-        await installLlvmNmWithCurl();
+        const installed = await installLlvmNmWithCurl();
+        if (installed) {
+            panelProvider.refresh();
+        }
     });
 
     // Register reveal tool path command (click to open install folder)
@@ -562,9 +562,7 @@ export function activate(context: vscode.ExtensionContext) {
             // Switch to the specified dump file
             panelProvider.switchToDumpFile(filePath);
             
-            // Re-analyze the file
-            const config = vscode.workspace.getConfiguration('minidump-parser');
-            const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+            const symbolPath = getSymbolPath();
             
             await analyzeDumpFile(context, filePath, symbolPath);
             
@@ -625,16 +623,19 @@ export function activate(context: vscode.ExtensionContext) {
     // Register switch language command
     const switchLanguageCommand = vscode.commands.registerCommand('minidump-parser.switchLanguage', async () => {
         try {
-            const availableLocales = localization.getAvailableLocales();
-            const currentLocale = localization.getCurrentLocale();
-            
-            // Create quick pick items with localized names
+            const languagePreference = localization.getLanguagePreference();
+            const availableLocales = ['auto', ...localization.getAvailableLocales()];
+
             const languageItems = availableLocales.map(locale => {
-                const isActive = locale === currentLocale;
+                const isActive = locale === languagePreference;
                 let localizedName: string;
                 let nativeName: string;
-                
+
                 switch (locale) {
+                    case 'auto':
+                        localizedName = localization.getUI('autoLanguage');
+                        nativeName = localization.getUI('autoLanguage');
+                        break;
                     case 'en':
                         localizedName = localization.getUI('english');
                         nativeName = localization.getUI('nativeEnglishName');
@@ -648,13 +649,21 @@ export function activate(context: vscode.ExtensionContext) {
                         nativeName = locale;
                         break;
                 }
-                
+
+                const label = localizedName === nativeName
+                    ? localizedName
+                    : `${localizedName} (${nativeName})`;
+
                 return {
-                    label: `${localizedName} (${nativeName})`,
-                    description: isActive ? localization.getUI('currentLanguage') : locale.toUpperCase(),
+                    label,
+                    description: isActive
+                        ? localization.getUI('currentLanguage')
+                        : locale === 'auto' ? 'AUTO' : locale.toUpperCase(),
                     detail: isActive
                         ? localization.getUI('languageTooltip')
-                        : localization.format(localization.getUI('switchToLanguage'), localizedName),
+                        : locale === 'auto'
+                            ? localization.getUI('followVsCodeLanguage')
+                            : localization.format(localization.getUI('switchToLanguage'), localizedName),
                     locale: locale
                 };
             });
@@ -665,20 +674,25 @@ export function activate(context: vscode.ExtensionContext) {
                 ignoreFocusOut: false
             });
 
-            if (selectedItem && selectedItem.locale !== currentLocale) {
-                localization.setLocale(selectedItem.locale);
-                
-                // Show success message in both languages
-                const successMessage = selectedItem.locale === 'zh-cn' 
-                    ? localization.getUI('languageChangedChinese')
-                    : localization.format(localization.getUI('languageChanged'), selectedItem.label.split(' (')[0]);
-                    
+            if (selectedItem && selectedItem.locale !== languagePreference) {
+                await localization.setLocale(selectedItem.locale);
+
+                let successMessage: string;
+                if (selectedItem.locale === 'auto') {
+                    successMessage = localization.getUI('languageChangedAuto');
+                } else if (selectedItem.locale === 'zh-cn') {
+                    successMessage = localization.getUI('languageChangedChinese');
+                } else {
+                    successMessage = localization.format(
+                        localization.getUI('languageChanged'),
+                        selectedItem.label.split(' (')[0],
+                    );
+                }
+
                 vscode.window.showInformationMessage(successMessage);
-                
-                // Refresh the panel to show the new language
                 panelProvider.refresh();
             }
-            
+
         } catch (error: any) {
             vscode.window.showErrorMessage(localization.format(localization.getUI('languageSwitchError'), error.message || error));
         }
@@ -760,8 +774,7 @@ Stack trace:
         if (!choice) {
             return;
         }
-        const config = vscode.workspace.getConfiguration('minidump-parser');
-        const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+        const symbolPath = getSymbolPath();
         if (!fs.existsSync(symbolPath)) {
             fs.mkdirSync(symbolPath, { recursive: true });
         }

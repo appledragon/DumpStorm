@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import {
-    DEFAULT_CONFIG,
+    getSymbolPath,
     isNmAvailable,
     getNmCommand,
     getCustomMinidumpStackwalkPath,
@@ -83,19 +83,22 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             return items;
         } else if (element.contextValue === 'config') {
             // Configuration items
-            const config = vscode.workspace.getConfiguration('minidump-parser');
-            const symbolPath = config.get<string>('symbolPath') || DEFAULT_CONFIG.SYMBOL_PATH;
+            const symbolPath = getSymbolPath();
             const customMinidumpPath = getCustomMinidumpStackwalkPath();
             const customNmPath = getCustomNmPath();
             const customLlvmNmPath = getCustomLlvmNmPath();
             const customDumpSymsPath = getCustomDumpSymsPath();
             const customLlvmUndnamePath = getCustomLlvmUndnamePath();
             const currentLanguage = localization.getCurrentLocale();
-            const languageDisplayName = currentLanguage === 'en'
+            const languagePreference = localization.getLanguagePreference();
+            const resolvedLanguageName = currentLanguage === 'en'
                 ? localization.getUI('english')
                 : currentLanguage === 'zh-cn'
                     ? localization.getUI('chineseSimplified')
                     : currentLanguage;
+            const languageDisplayName = languagePreference === 'auto'
+                ? `${localization.getUI('autoLanguage')} (${resolvedLanguageName})`
+                : resolvedLanguageName;
             
             const items: BreakpadItem[] = [
                 new BreakpadItem(
@@ -487,32 +490,34 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const isWindows = platform === 'win32';
             
             // Prepare installation options with Windows-specific highlighting
-            const options = [
+            const options: Array<vscode.QuickPickItem & { method: 'curl' | 'standard' | 'manual' }> = [
                 {
                     label: isWindows ? `${localization.getUI('recommendedForWindows')} ${localization.getUI('alternativeInstallation')}` : localization.getUI('alternativeInstallation'),
                     description: localization.getUI('alternativeInstallationDesc'),
-                    detail: localization.getUI('alternativeInstallationDetail')
+                    detail: localization.getUI('alternativeInstallationDetail'),
+                    method: 'curl',
                 },
                 {
                     label: localization.getUI('standardInstallation'),
                     description: localization.getUI('standardInstallationDesc'),
-                    detail: localization.getUI('standardInstallationDetail')
+                    detail: localization.getUI('standardInstallationDetail'),
+                    method: 'standard',
                 },
                 {
                     label: localization.getUI('manualInstallation'),
                     description: localization.getUI('manualInstallationDesc'),
-                    detail: localization.getUI('manualInstallationDetail')
+                    detail: localization.getUI('manualInstallationDetail'),
+                    method: 'manual',
                 }
             ];
 
-            // For Windows, show additional guidance
             if (isWindows) {
                 const guidance = await vscode.window.showInformationMessage(
                     localization.getUI('recommendedInstallMethodWindows'),
                     localization.getUI('yes'), localization.getUI('cancel')
                 );
                 
-                if (guidance === localization.getUI('cancel')) {
+                if (guidance !== localization.getUI('yes')) {
                     return;
                 }
             }
@@ -527,13 +532,8 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 return; // User canceled
             }
 
-            // Handle the method selection, accounting for Windows highlighting
-            const isRecommendedMethod = method.label.includes('⭐') || method.label === localization.getUI('alternativeInstallation');
-            const isStandardMethod = method.label === localization.getUI('standardInstallation');
-            const isManualMethod = method.label === localization.getUI('manualInstallation');
             let installed = false;
-
-            if (isStandardMethod) {
+            if (method.method === 'standard') {
                 installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingStackwalkStandard'),
@@ -541,8 +541,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 }, async (progress) => {
                     return installMinidumpStackwalk();
                 });
-            } else if (isRecommendedMethod) {
-                // Use curl-based installer
+            } else if (method.method === 'curl') {
                 installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingStackwalkAlternative'),
@@ -550,7 +549,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 }, async (progress) => {
                     return installMinidumpStackwalkWithCurl();
                 });
-            } else if (isManualMethod) {
+            } else if (method.method === 'manual') {
                 // Show manual installation guide
                 this.showManualInstallationGuide();
                 return;
@@ -563,7 +562,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             vscode.window.showInformationMessage(localization.getUI('installSuccess'));
             this.refresh();
         } catch (error: any) {
-            vscode.window.showErrorMessage(localization.format(localization.getUI('installFailed'), error.message));
+            vscode.window.showErrorMessage(localization.format(localization.getUI('installFailed'), error?.message ?? error));
         }
     }
 
@@ -599,33 +598,34 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const isWindows = platform === 'win32';
             
             // Prepare installation options with Windows-specific highlighting
-            const options = [
+            const options: Array<vscode.QuickPickItem & { method: 'curl' | 'standard' | 'manual' }> = [
                 {
                     label: isWindows ? `${localization.getUI('recommendedForWindows')} ${localization.getUI('alternativeInstallationLlvm')}` : localization.getUI('alternativeInstallationLlvm'),
                     description: localization.getUI('alternativeInstallationLlvmDesc'),
-                    detail: localization.getUI('alternativeInstallationLlvmDetail')
+                    detail: localization.getUI('alternativeInstallationLlvmDetail'),
+                    method: 'curl',
                 },
                 {
                     label: localization.getUI('standardInstallationLlvm'),
                     description: localization.getUI('standardInstallationLlvmDesc'),
-                    detail: localization.getUI('standardInstallationLlvmDetail')
+                    detail: localization.getUI('standardInstallationLlvmDetail'),
+                    method: 'standard',
                 },
                 {
                     label: localization.getUI('manualInstallation'),
                     description: localization.getUI('manualInstallationDesc'),
-                    detail: localization.getUI('manualInstallationDetail')
+                    detail: localization.getUI('manualInstallationDetail'),
+                    method: 'manual',
                 }
             ];
 
-            // For Windows, reorder to put curl method first and add guidance
             if (isWindows) {
-                // Show additional guidance for Windows users
                 const guidance = await vscode.window.showInformationMessage(
                     localization.getUI('recommendedInstallMethodWindows'),
                     localization.getUI('yes'), localization.getUI('cancel')
                 );
                 
-                if (guidance === localization.getUI('cancel')) {
+                if (guidance !== localization.getUI('yes')) {
                     return;
                 }
             }
@@ -640,13 +640,8 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 return; // User canceled
             }
 
-            // Handle the method selection, accounting for Windows highlighting
-            const isRecommendedMethod = method.label.includes('⭐') || method.label === localization.getUI('alternativeInstallationLlvm');
-            const isStandardMethod = method.label === localization.getUI('standardInstallationLlvm');
-            const isManualMethod = method.label === localization.getUI('manualInstallation');
             let installed = false;
-
-            if (isStandardMethod) {
+            if (method.method === 'standard') {
                 installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingLlvmNmStandard'),
@@ -654,8 +649,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 }, async (progress) => {
                     return installLlvmNm();
                 });
-            } else if (isRecommendedMethod) {
-                // Use curl-based installer
+            } else if (method.method === 'curl') {
                 installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingLlvmNmAlternative'),
@@ -663,7 +657,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 }, async (progress) => {
                     return installLlvmNmWithCurl();
                 });
-            } else if (isManualMethod) {
+            } else if (method.method === 'manual') {
                 // Show manual installation guide for llvm-nm
                 this.showLlvmNmManualInstallationGuide();
                 return;
@@ -676,7 +670,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             vscode.window.showInformationMessage(localization.getUI('llvmNmInstalledSuccessfully'));
             this.refresh();
         } catch (error: any) {
-            vscode.window.showErrorMessage(localization.format(localization.getUI('installer.llvmNmInstallationFailed'), error.message));
+            vscode.window.showErrorMessage(localization.format(localization.getUI('installer.llvmNmInstallationFailed'), error?.message ?? error));
         }
     }
 

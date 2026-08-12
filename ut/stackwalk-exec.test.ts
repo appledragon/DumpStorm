@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 jest.mock('child_process', () => ({
   execFile: jest.fn(),
   execSync: jest.fn(),
+  execFileSync: jest.fn(),
 }));
 
 jest.mock('../src/symbols/enhancer', () => ({

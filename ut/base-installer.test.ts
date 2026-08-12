@@ -6,6 +6,8 @@ import {
   BinaryInfo,
   appendTempSuffix,
   getPowerShellArchiveArgs,
+  getPowerShellArchiveEnv,
+  POWERSHELL_ARCHIVE_ENV,
   ToolConfig,
 } from '../src/tools/base-installer';
 
@@ -123,7 +125,7 @@ class TestInstaller extends BaseInstaller {
     return this.findExecutablesInDir(dir, platform);
   }
 
-  public testValidateDownloadedFile(tempFile: string, reject: (error: string) => void): boolean {
+  public testValidateDownloadedFile(tempFile: string, reject: (error: Error) => void): boolean {
     return this.validateDownloadedFile(tempFile, reject);
   }
 
@@ -291,16 +293,19 @@ describe('BaseInstaller', () => {
     expect(vscodeMock.window.withProgress).not.toHaveBeenCalled();
   });
 
-  it('passes Windows archive paths as arguments even with spaces and quotes', () => {
+  it('passes Windows archive paths through environment variables, not command-line arguments', () => {
     const archivePath = "C:\\Crash Tools\\vendor's\\tool.zip";
     const destinationPath = "C:\\Crash Tools\\extract'ed";
-    const args = getPowerShellArchiveArgs(archivePath, destinationPath);
+    const args = getPowerShellArchiveArgs();
+    const env = getPowerShellArchiveEnv(archivePath, destinationPath);
 
-    expect(args).toContain(archivePath);
-    expect(args).toContain(destinationPath);
-    expect(args[args.length - 2]).toBe(archivePath);
-    expect(args[args.length - 1]).toBe(destinationPath);
-    expect(args.join(' ')).not.toContain(`'${archivePath}'`);
+    expect(args).not.toContain(archivePath);
+    expect(args).not.toContain(destinationPath);
+    expect(args.join(' ')).not.toContain(archivePath);
+    expect(args.join(' ')).toContain(`$env:${POWERSHELL_ARCHIVE_ENV.archive}`);
+    expect(args.join(' ')).toContain(`$env:${POWERSHELL_ARCHIVE_ENV.destination}`);
+    expect(env[POWERSHELL_ARCHIVE_ENV.archive]).toBe(archivePath);
+    expect(env[POWERSHELL_ARCHIVE_ENV.destination]).toBe(destinationPath);
   });
 
   it('keeps the archive extension after adding a temporary suffix', () => {

@@ -2,6 +2,33 @@
 
 All notable changes to the DumpStorm extension will be documented in this file.
 
+## [1.1.0] - 2026-08-13
+
+### Fixed
+- **PowerShell extract on Windows**: Archive extraction no longer fails silently when the install path contains spaces; paths are passed through environment variables instead of interpolated into the script
+- **Symbol match report**: Look up Breakpad `.sym` files by `debug_file` (PDB) instead of `code_file` (exe/dll) so Windows modules can match
+- **Download redirects**: Remove error/timeout listeners from the previous request when following GitHub redirects, and refuse HTTPS→HTTP downgrades
+- **Tool install cancellation**: Detect cancel via the cancellation token instead of comparing localized strings; clean up uniquely named temp files on failure; do not treat cancel-after-success as failure
+- **Analysis timeout copy**: Timeout message now reports the actual 240s overall limit instead of 120s
+- **Diagnostic dedup**: Deduplicate severe diagnostics with a `Set` and cap the number of entries
+- **llvm-undname**: Listen for stdin errors so a closed pipe cannot crash the extension; skip demangling when the output line count does not match the input
+- **Default symbol path**: Empty `symbolPath` now uses `~/.dumpstorm/symbols` on Windows (the 1.0.4 fix never took effect because package.json still defaulted to `/tmp/symbols`)
+- **Language auto**: Language setting defaults to `auto` and follows the VS Code display language
+
+## [1.0.9] - 2026-08-12
+
+### Added
+- **Machine-format dump analysis**: Parse minidump_stackwalk `-m` output for crash summaries and more reliable stack reconstruction
+- **Stackwalk timeout and cancel**: Bound dump analysis with timeouts and support cancellation
+- **Crash summary and symbol match report**: Surface crashing module/exception info and report which modules have matching Breakpad symbols
+- **Stack-scan frame folding**: Fold contiguous low-confidence stack-scanning frames; enable `showStackScanFrames` to show every frame
+- **Custom tool paths**: `customDumpSymsPath` and `customLlvmUndnamePath` settings for Breakpad dump_syms and llvm-undname
+- **Release validation**: `scripts/validate-extension.js` checks locales, commands, and configuration before packaging
+- Example dumps and a large unit-test suite covering analysis, installers, and downloads
+
+### Improved
+- **Downloader**: Shared `download.ts` with curl-based installers using async downloads and unique temp-file suffixes
+
 ## [1.0.5] - 2026-04-12
 
 ### Added

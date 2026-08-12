@@ -2,7 +2,7 @@
   "name": "minidump-parser",
   "displayName": "Minidump Parser",
   "description": "Powerful crash dump analyzer for native applications. Analyze minidump files (.dmp), extract symbols, enhance stack traces, and analyze crashes with register tooltips and multilingual support.",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "publisher": "CuiLiAn",
   "repository": {
     "type": "git",
@@ -210,8 +210,8 @@
       "properties": {
         "minidump-parser.symbolPath": {
           "type": "string",
-          "default": "/tmp/symbols",
-          "description": "Path to symbol files"
+          "default": "",
+          "description": "Path to symbol files. Leave empty to use the platform default (Windows: ~/.dumpstorm/symbols, Unix: /tmp/symbols)."
         },
         "minidump-parser.customMinidumpStackwalkPath": {
           "type": "string",
@@ -241,15 +241,17 @@
         "minidump-parser.language": {
           "type": "string",
           "enum": [
+            "auto",
             "en",
             "zh-cn"
           ],
           "enumDescriptions": [
+            "Follow VS Code display language / 跟随 VS Code 显示语言",
             "English",
             "简体中文"
           ],
-          "default": "en",
-          "description": "Language for register tooltips and UI elements"
+          "default": "auto",
+          "description": "Language for register tooltips and UI elements. Use auto to follow the VS Code display language."
         }
       }
     }

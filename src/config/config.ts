@@ -179,13 +179,31 @@ function findNmBinaryPath(): string | null {
     return null;
 }
 
+export function getDefaultSymbolPath(
+    platform: NodeJS.Platform = os.platform(),
+    homedir: string = os.homedir(),
+): string {
+    return platform === 'win32'
+        ? path.join(homedir, '.dumpstorm', 'symbols')
+        : '/tmp/symbols';
+}
+
 // Default configuration values
 export const DEFAULT_CONFIG = {
-    SYMBOL_PATH: os.platform() === 'win32'
-        ? path.join(os.homedir(), '.dumpstorm', 'symbols')
-        : '/tmp/symbols',
+    get SYMBOL_PATH(): string {
+        return getDefaultSymbolPath();
+    },
     HOME_SYMBOL_PATH: 'symbols'
 };
+
+/**
+ * Effective symbol directory: a non-empty setting, otherwise the platform default.
+ * package.json leaves `symbolPath` empty so Windows can use ~/.dumpstorm/symbols.
+ */
+export function getSymbolPath(): string {
+    const config = vscode.workspace.getConfiguration('minidump-parser');
+    return config.get<string>('symbolPath')?.trim() || DEFAULT_CONFIG.SYMBOL_PATH;
+}
 
 // Helper function to get custom tool path from VS Code settings
 function getCustomSettingPath(settingName: string): string | undefined {

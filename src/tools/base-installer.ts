@@ -24,18 +24,66 @@ export interface BinaryInfo {
     toolName: string;
 }
 
-export function getPowerShellArchiveArgs(archivePath: string, destinationPath: string): string[] {
-    const extractScript = '& { param([string]$archivePath, [string]$destinationPath) ' +
-        'Expand-Archive -LiteralPath $archivePath -DestinationPath $destinationPath -Force -ErrorAction Stop }';
+export const POWERSHELL_ARCHIVE_ENV = {
+    archive: 'DUMPSTORM_ARCHIVE_PATH',
+    destination: 'DUMPSTORM_DESTINATION_PATH',
+} as const;
+
+/**
+ * PowerShell -Command re-parses the raw command line and strips quotes, so
+ * archive paths must not be passed as trailing arguments. Environment
+ * variables keep spaces and metacharacters out of the script text.
+ */
+export function getPowerShellArchiveArgs(): string[] {
     return [
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        extractScript,
-        archivePath,
-        destinationPath,
+        "$ErrorActionPreference = 'Stop'; " +
+        `Expand-Archive -LiteralPath $env:${POWERSHELL_ARCHIVE_ENV.archive} ` +
+        `-DestinationPath $env:${POWERSHELL_ARCHIVE_ENV.destination} -Force`,
     ];
+}
+
+export function getPowerShellArchiveEnv(archivePath: string, destinationPath: string): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        [POWERSHELL_ARCHIVE_ENV.archive]: archivePath,
+        [POWERSHELL_ARCHIVE_ENV.destination]: destinationPath,
+    };
+}
+
+export function extractZipWithPowerShell(archivePath: string, destinationPath: string): void {
+    execFileSync('powershell.exe', getPowerShellArchiveArgs(), {
+        env: getPowerShellArchiveEnv(archivePath, destinationPath),
+        windowsHide: true,
+    });
+}
+
+export class InstallCancelledError extends Error {
+    readonly code = 'INSTALL_CANCELLED';
+
+    constructor(message?: string) {
+        super(message ?? localization.getUI('installer.installationCancelledByUser'));
+        this.name = 'InstallCancelledError';
+    }
+}
+
+export function isInstallCancelledError(error: unknown): boolean {
+    if (!error) {
+        return false;
+    }
+    if (error instanceof InstallCancelledError) {
+        return true;
+    }
+    if (typeof error === 'object' && (error as { code?: string }).code === 'INSTALL_CANCELLED') {
+        return true;
+    }
+    if (typeof error === 'object' && (error as { code?: string }).code === 'DOWNLOAD_CANCELLED') {
+        return true;
+    }
+    return false;
 }
 
 export function appendTempSuffix(fileName: string, suffix: string): string {
@@ -102,10 +150,10 @@ export abstract class BaseInstaller {
                 });
             });
         } catch (error) {
-            if (String(error) === localization.getUI('installer.installationCancelledByUser')) {
+            if (isInstallCancelledError(error)) {
                 return false;
             }
-            throw error;
+            throw error instanceof Error ? error : new Error(String(error));
         }
         
         // Show final confirmation modal
@@ -124,21 +172,20 @@ export abstract class BaseInstaller {
         binaryInfo: BinaryInfo,
         progress: vscode.Progress<any>, 
         resolve: () => void, 
-        reject: (error: string) => void, 
+        reject: (error: Error) => void, 
         token: vscode.CancellationToken
     ): Promise<void> {
+        const config = this.getToolConfig();
+        let tempFile = '';
+        let tempDir = '';
         try {
-            // Check if cancelled
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
             
             console.log(`Installing ${binaryInfo.toolName} for Windows`);
             console.log(`Download URL: ${binaryInfo.downloadUrl}`);
             
-            // Ensure .dumpstorm/bin directory exists
-            const config = this.getToolConfig();
             const dumpstormDir = path.join(os.homedir(), config.INSTALL_PATHS.DUMPSTORM_BIN);
             console.log(`Target installation directory: ${dumpstormDir}`);
             if (!fs.existsSync(dumpstormDir)) {
@@ -146,32 +193,27 @@ export abstract class BaseInstaller {
                 console.log(`Created directory: ${dumpstormDir}`);
             }
 
-            // Download the zip file
             const tempSuffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            const tempFile = path.join(
+            tempFile = path.join(
                 os.tmpdir(),
                 appendTempSuffix(path.basename(config.INSTALL_PATHS.TEMP_ZIP), tempSuffix),
             );
-            const tempDir = path.join(
+            tempDir = path.join(
                 os.tmpdir(),
                 appendTempSuffix(path.basename(config.INSTALL_PATHS.TEMP_EXTRACT), tempSuffix),
             );
             
-            // Clean up existing temp files
             this.cleanupTempFiles(tempFile, tempDir);
 
             await downloadFile(binaryInfo.downloadUrl, tempFile, {
                 token: token as DownloadCancellationToken,
             });
 
-            // Check file size
             if (!this.validateDownloadedFile(tempFile, reject)) {
                 return;
             }
 
-            // Check if cancelled before proceeding
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
 
@@ -180,7 +222,6 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('downloadingTool'), binaryInfo.toolName),
             });
 
-            // Create temp extraction directory
             if (!fs.existsSync(tempDir)) {
                 fs.mkdirSync(tempDir, { recursive: true });
             }
@@ -190,28 +231,24 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('extractingTool'), binaryInfo.toolName),
             });
 
-            // Use PowerShell to extract zip file (available on Windows 10+)
-            console.log(`Extracting archive with PowerShell using parameterized paths`);
-            execFileSync('powershell.exe', getPowerShellArchiveArgs(tempFile, tempDir));
+            console.log(`Extracting archive with PowerShell using environment-variable paths`);
+            extractZipWithPowerShell(tempFile, tempDir);
             console.log(`Extraction completed to: ${tempDir}`);
 
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
 
-            // List all files immediately after extraction for debugging
             const allFiles = this.listAllFiles(tempDir);
             console.log(`All extracted files:\n${allFiles.join('\n')}`);
 
-            // Find the executable files
             const foundExes = this.findExecutablesInDir(tempDir, 'win32');
             console.log(`Executables found by recursive search:`, foundExes);
 
             const mainExecutable = Object.values(foundExes)[0];
             if (!mainExecutable) {
                 console.log('No executables found, listing all files for debugging');
-                reject(localization.format(localization.getUI('installer.noExecutableFound'), tempDir, allFiles.join('\n')));
+                reject(new Error(localization.format(localization.getUI('installer.noExecutableFound'), tempDir, allFiles.join('\n'))));
                 return;
             }
 
@@ -220,39 +257,31 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('installingTool'), binaryInfo.toolName),
             });
 
-            // Copy binary to dumpstorm bin directory
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
             const targetPath = path.join(dumpstormDir, binaryInfo.binaryName);
             fs.copyFileSync(mainExecutable, targetPath);
             console.log(`Installed ${binaryInfo.toolName} to: ${targetPath}`);
 
-            // Clean up temp files
-            fs.unlinkSync(tempFile);
-            fs.rmSync(tempDir, { recursive: true, force: true });
-
             progress.report({
                 increment: 100,
                 message: localization.format(localization.getUI('toolInstallationCompleted'), binaryInfo.toolName),
             });
 
-            // Keep the progress dialog open for a few seconds so user can see completion
-            setTimeout(() => {
-                if (token.isCancellationRequested) {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
-                } else {
-                    resolve();
-                }
-            }, 3000);
+            setTimeout(() => resolve(), 3000);
             
         } catch (error) {
-            if (token.isCancellationRequested || (error as any)?.code === 'DOWNLOAD_CANCELLED') {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (token.isCancellationRequested || isInstallCancelledError(error)) {
+                reject(new InstallCancelledError());
             } else {
-                reject(localization.format(localization.getUI('installer.installationFailed'), error));
+                reject(new Error(localization.format(
+                    localization.getUI('installer.installationFailed'),
+                    error instanceof Error ? error.message : error,
+                )));
             }
+        } finally {
+            this.cleanupTempFiles(tempFile, tempDir);
         }
     }
 
@@ -263,13 +292,14 @@ export abstract class BaseInstaller {
         binaryInfo: BinaryInfo,
         progress: vscode.Progress<any>, 
         resolve: () => void, 
-        reject: (error: string) => void, 
+        reject: (error: Error) => void, 
         token: vscode.CancellationToken
     ): Promise<void> {
+        const config = this.getToolConfig();
+        let tempFile = '';
+        let tempDir = '';
         try {
-            // Check if cancelled
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
             
@@ -279,8 +309,6 @@ export abstract class BaseInstaller {
             console.log(`Installing ${binaryInfo.toolName} for platform: ${platform}, arch: ${arch}`);
             console.log(`Download URL: ${binaryInfo.downloadUrl}`);
             
-            // Ensure .dumpstorm/bin directory exists
-            const config = this.getToolConfig();
             const dumpstormDir = path.join(os.homedir(), config.INSTALL_PATHS.DUMPSTORM_BIN);
             console.log(`Target installation directory: ${dumpstormDir}`);
             if (!fs.existsSync(dumpstormDir)) {
@@ -288,16 +316,15 @@ export abstract class BaseInstaller {
                 console.log(`Created directory: ${dumpstormDir}`);
             }
 
-            // Download the tar.gz file
             const tempSuffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            const tempFile = path.join(
+            tempFile = path.join(
                 os.tmpdir(),
                 appendTempSuffix(
                     path.basename(config.INSTALL_PATHS.TEMP_TAR || 'temp-download.tar.gz'),
                     tempSuffix,
                 ),
             );
-            const tempDir = path.join(
+            tempDir = path.join(
                 os.tmpdir(),
                 appendTempSuffix(path.basename(config.INSTALL_PATHS.TEMP_EXTRACT), tempSuffix),
             );
@@ -305,20 +332,16 @@ export abstract class BaseInstaller {
             console.log(`Temp file: ${tempFile}`);
             console.log(`Temp dir: ${tempDir}`);
             
-            // Clean up any existing temp files/directories
             this.cleanupTempFiles(tempFile, tempDir);
 
             await downloadFile(binaryInfo.downloadUrl, tempFile, {
                 token: token as DownloadCancellationToken,
             });
 
-            // Check if cancelled before proceeding
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
 
-            // Check file size
             if (!this.validateDownloadedFile(tempFile, reject)) {
                 return;
             }
@@ -333,7 +356,6 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('extractingTool'), binaryInfo.toolName),
             });
 
-            // Create temp extraction directory
             if (!fs.existsSync(tempDir)) {
                 fs.mkdirSync(tempDir, { recursive: true });
                 console.log(`Created extraction directory: ${tempDir}`);
@@ -341,13 +363,11 @@ export abstract class BaseInstaller {
                 console.log(`Extraction directory already exists: ${tempDir}`);
             }
 
-            // Verify temp file exists before extraction
             if (!fs.existsSync(tempFile)) {
-                reject(localization.format(localization.getUI('installer.tempFileDisappeared'), tempFile));
+                reject(new Error(localization.format(localization.getUI('installer.tempFileDisappeared'), tempFile)));
                 return;
             }
 
-            // Extract tar.gz file
             console.log(`Extracting archive with parameterized tar arguments`);
 
             try {
@@ -356,27 +376,25 @@ export abstract class BaseInstaller {
             } catch (extractError: any) {
                 console.log(`Extraction error: ${extractError.message}`);
                 console.log(`Extraction stderr: ${extractError.stderr}`);
-                reject(localization.format(localization.getUI('installer.extractionFailed'), extractError.message));
+                reject(new Error(localization.format(localization.getUI('installer.extractionFailed'), extractError.message)));
                 return;
             }
 
             console.log(`Extraction completed to: ${tempDir}`);
 
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
 
-            // Verify extraction directory exists and has content
             if (!fs.existsSync(tempDir)) {
-                reject(localization.format(localization.getUI('installer.extractionDirectoryNotCreated'), tempDir));
+                reject(new Error(localization.format(localization.getUI('installer.extractionDirectoryNotCreated'), tempDir)));
                 return;
             }
 
             const tempDirContents = fs.readdirSync(tempDir);
             console.log(`Extraction directory contents: ${tempDirContents.join(', ')}`);
             if (tempDirContents.length === 0) {
-                reject(localization.format(localization.getUI('installer.extractionDirectoryEmpty'), tempDir));
+                reject(new Error(localization.format(localization.getUI('installer.extractionDirectoryEmpty'), tempDir)));
                 return;
             }
 
@@ -385,24 +403,20 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('installingTool'), binaryInfo.toolName),
             });
 
-            // List all files immediately after extraction for debugging
             const allFiles = this.listAllFiles(tempDir);
             console.log(`All extracted files:\n${allFiles.join('\n')}`);
 
-            // Find the binaries in extracted files
             const foundBinaries = this.findExecutablesInDir(tempDir, platform);
             console.log(`Binaries found by recursive search:`, foundBinaries);
 
             const mainExecutable = Object.values(foundBinaries)[0];
             if (!mainExecutable) {
                 console.log('No binaries found, listing all files for debugging');
-                reject(localization.format(localization.getUI('installer.noBinaryFound'), platform, arch, tempDir, allFiles.join('\n')));
+                reject(new Error(localization.format(localization.getUI('installer.noBinaryFound'), platform, arch, tempDir, allFiles.join('\n'))));
                 return;
             }
 
-            // Copy binary to dumpstorm bin directory
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (this.rejectIfCancelled(token, reject)) {
                 return;
             }
             const targetPath = path.join(dumpstormDir, binaryInfo.binaryName);
@@ -415,42 +429,46 @@ export abstract class BaseInstaller {
                 message: localization.format(localization.getUI('toolInstallationCompleted'), binaryInfo.toolName),
             });
 
-            // Clean up temp files
-            try {
-                fs.unlinkSync(tempFile);
-                fs.rmSync(tempDir, { recursive: true, force: true });
-            } catch (cleanupError) {
-                // Ignore cleanup errors
-            }
-
-            // Keep the progress dialog open for a few seconds so user can see completion
-            setTimeout(() => {
-                if (token.isCancellationRequested) {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
-                } else {
-                    resolve();
-                }
-            }, 2000);
+            setTimeout(() => resolve(), 2000);
             
         } catch (error) {
-            if (token.isCancellationRequested || (error as any)?.code === 'DOWNLOAD_CANCELLED') {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (token.isCancellationRequested || isInstallCancelledError(error)) {
+                reject(new InstallCancelledError());
             } else {
-                reject(localization.format(localization.getUI('installer.installationFailed'), error));
+                reject(new Error(localization.format(
+                    localization.getUI('installer.installationFailed'),
+                    error instanceof Error ? error.message : error,
+                )));
             }
+        } finally {
+            this.cleanupTempFiles(tempFile, tempDir);
         }
+    }
+
+    protected rejectIfCancelled(
+        token: vscode.CancellationToken,
+        reject: (error: Error) => void,
+    ): boolean {
+        if (!token.isCancellationRequested) {
+            return false;
+        }
+        reject(new InstallCancelledError());
+        return true;
     }
 
     /**
      * Clean up temporary files
      */
     protected cleanupTempFiles(tempFile: string, tempDir: string): void {
+        if (!tempFile && !tempDir) {
+            return;
+        }
         try {
-            if (fs.existsSync(tempFile)) {
+            if (tempFile && fs.existsSync(tempFile)) {
                 fs.unlinkSync(tempFile);
                 console.log(`Cleaned up existing temp file: ${tempFile}`);
             }
-            if (fs.existsSync(tempDir)) {
+            if (tempDir && fs.existsSync(tempDir)) {
                 fs.rmSync(tempDir, { recursive: true, force: true });
                 console.log(`Cleaned up existing temp dir: ${tempDir}`);
             }
@@ -462,17 +480,17 @@ export abstract class BaseInstaller {
     /**
      * Validate downloaded file
      */
-    protected validateDownloadedFile(tempFile: string, reject: (error: string) => void): boolean {
+    protected validateDownloadedFile(tempFile: string, reject: (error: Error) => void): boolean {
         try {
             const stats = fs.statSync(tempFile);
             console.log(`Downloaded file size: ${stats.size} bytes`);
             if (stats.size === 0) {
-                reject(localization.getUI('installer.downloadedFileEmpty'));
+                reject(new Error(localization.getUI('installer.downloadedFileEmpty')));
                 return false;
             }
             return true;
         } catch (statError) {
-            reject(localization.format(localization.getUI('installer.failedToCheckDownloadedFile'), statError));
+            reject(new Error(localization.format(localization.getUI('installer.failedToCheckDownloadedFile'), statError)));
             return false;
         }
     }

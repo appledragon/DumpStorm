@@ -80,7 +80,14 @@ export async function demangleMsvcNames(names: string[]): Promise<Map<string, st
                 }
                 // llvm-undname emits one demangled name per input line, in order.
                 const out = stdout.split(/\r?\n/);
-                for (let i = 0; i < unique.length && i < out.length; i++) {
+                if (out.length > 0 && out[out.length - 1] === '') {
+                    out.pop();
+                }
+                if (out.length !== unique.length) {
+                    resolve(result);
+                    return;
+                }
+                for (let i = 0; i < unique.length; i++) {
                     const demangled = out[i].trim();
                     if (demangled && demangled !== unique[i]) {
                         result.set(unique[i], demangled);
@@ -90,9 +97,11 @@ export async function demangleMsvcNames(names: string[]): Promise<Map<string, st
             },
         );
         if (child.stdin) {
+            child.stdin.on('error', () => resolve(result));
             child.stdin.end(unique.join('\n') + '\n');
         } else {
             resolve(result);
         }
+        child.on('error', () => resolve(result));
     });
 }

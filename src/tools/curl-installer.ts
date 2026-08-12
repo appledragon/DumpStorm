@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { localization } from '../localization/localization';
 import { spawn, execFileSync } from 'child_process';
-import { appendTempSuffix, BinaryInfo, getPowerShellArchiveArgs, ToolConfig } from './base-installer';
+import { appendTempSuffix, BinaryInfo, extractZipWithPowerShell, InstallCancelledError, isInstallCancelledError, ToolConfig } from './base-installer';
 import { DOWNLOAD_TIMEOUT_MS, MAX_DOWNLOAD_REDIRECTS, DownloadCancellationToken, DownloadError } from './download';
 
 function downloadWithCurl(
@@ -75,7 +75,9 @@ function downloadWithCurl(
                 '--show-error',
                 '--location',
                 '--max-redirs', String(MAX_DOWNLOAD_REDIRECTS),
-                '--connect-timeout', String(timeoutSeconds),
+                '--proto', '=https',
+                '--proto-redir', '=https',
+                '--connect-timeout', '30',
                 '--max-time', String(timeoutSeconds),
                 '--output', destination,
                 downloadUrl,
@@ -187,10 +189,10 @@ export abstract class CurlBaseInstaller {
                 });
             });
         } catch (error) {
-            if (String(error) === localization.getUI('installer.installationCancelledByUser')) {
+            if (isInstallCancelledError(error)) {
                 return false;
             }
-            throw error;
+            throw error instanceof Error ? error : new Error(String(error));
         }
         
         // Show final confirmation modal
@@ -209,13 +211,15 @@ export abstract class CurlBaseInstaller {
         binaryInfo: BinaryInfo,
         progress: vscode.Progress<any>, 
         resolve: () => void, 
-        reject: (error: string) => void, 
+        reject: (error: Error) => void, 
         token: vscode.CancellationToken
     ): Promise<void> {
+        const config = this.getToolConfig();
+        let tempFile = '';
+        let tempDir = '';
         try {
-            // Check if cancelled
             if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+                reject(new InstallCancelledError());
                 return;
             }
             
@@ -224,8 +228,6 @@ export abstract class CurlBaseInstaller {
             console.log(`Installing ${binaryInfo.toolName} using curl`);
             console.log(`Download URL: ${binaryInfo.downloadUrl}`);
             
-            // Ensure .dumpstorm/bin directory exists
-            const config = this.getToolConfig();
             const dumpstormDir = path.join(os.homedir(), config.INSTALL_PATHS.DUMPSTORM_BIN);
             console.log(`Target installation directory: ${dumpstormDir}`);
             if (!fs.existsSync(dumpstormDir)) {
@@ -233,22 +235,20 @@ export abstract class CurlBaseInstaller {
                 console.log(`Created directory: ${dumpstormDir}`);
             }
 
-            // Determine file extension and temp file name
             const isZip = platform === 'win32';
             const tempSuffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            const tempFile = path.join(
+            tempFile = path.join(
                 os.tmpdir(),
                 appendTempSuffix(
                     path.basename(isZip ? config.INSTALL_PATHS.TEMP_ZIP : (config.INSTALL_PATHS.TEMP_TAR || 'temp-download.tar.gz')),
                     tempSuffix,
                 ),
             );
-            const tempDir = path.join(
+            tempDir = path.join(
                 os.tmpdir(),
                 appendTempSuffix(path.basename(config.INSTALL_PATHS.TEMP_EXTRACT), tempSuffix),
             );
             
-            // Clean up existing temp files
             this.cleanupTempFiles(tempFile, tempDir);
             
             progress.report({
@@ -256,8 +256,6 @@ export abstract class CurlBaseInstaller {
                 message: localization.format(localization.getUI('downloadingTool'), binaryInfo.toolName),
             });
             
-            // Download using curl. --location follows 301/302/303/307/308,
-            // while --max-time and the cancellation listener stop stuck downloads.
             try {
                 console.log(`Downloading with curl to "${tempFile}"`);
                 await downloadWithCurl(
@@ -268,20 +266,18 @@ export abstract class CurlBaseInstaller {
                 console.log(`Download completed to: ${tempFile}`);
             } catch (downloadError: any) {
                 if (token.isCancellationRequested || downloadError?.code === 'DOWNLOAD_CANCELLED') {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
+                    reject(new InstallCancelledError());
                 } else {
-                    reject(localization.format(localization.getUI('installer.downloadFailed'), downloadError.message));
+                    reject(new Error(localization.format(localization.getUI('installer.downloadFailed'), downloadError.message)));
                 }
                 return;
             }
             
-            // Check if cancelled before proceeding
             if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+                reject(new InstallCancelledError());
                 return;
             }
             
-            // Check file size
             if (!this.validateDownloadedFile(tempFile, reject)) {
                 return;
             }
@@ -291,110 +287,87 @@ export abstract class CurlBaseInstaller {
                 message: localization.format(localization.getUI('extractingTool'), binaryInfo.toolName),
             });
             
-            try {
-                // Create temp extraction directory
-                if (!fs.existsSync(tempDir)) {
-                    fs.mkdirSync(tempDir, { recursive: true });
-                    console.log(`Created extraction directory: ${tempDir}`);
-                }
-                
-                // Extract based on platform
-                if (isZip) {
-                    // Windows: use PowerShell to extract zip
-                    console.log(`Extracting archive with PowerShell using parameterized paths`);
-                    execFileSync('powershell.exe', getPowerShellArchiveArgs(tempFile, tempDir));
-                } else {
-                    // Unix: use tar to extract tar.gz
-                    console.log(`Extracting archive with parameterized tar arguments`);
-                    execFileSync('tar', ['-xzf', tempFile, '-C', tempDir], { encoding: 'utf8' });
-                }
-                
-                console.log(`Extraction completed to: ${tempDir}`);
-
-                if (token.isCancellationRequested) {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
-                    return;
-                }
-                
-                // Verify extraction
-                if (!fs.existsSync(tempDir)) {
-                    reject(localization.format(localization.getUI('installer.extractionDirectoryNotCreated'), tempDir));
-                    return;
-                }
-                
-                const tempDirContents = fs.readdirSync(tempDir);
-                console.log(`Extraction directory contents: ${tempDirContents.join(', ')}`);
-                if (tempDirContents.length === 0) {
-                    reject(localization.format(localization.getUI('installer.extractionDirectoryEmpty'), tempDir));
-                    return;
-                }
-                
-                progress.report({
-                    increment: 70,
-                    message: localization.format(localization.getUI('installingTool'), binaryInfo.toolName),
-                });
-                
-                // List all files for debugging
-                const allFiles = this.listAllFiles(tempDir);
-                console.log(`All extracted files:\n${allFiles.join('\n')}`);
-                
-                // Find the executables
-                const foundExecutables = this.findExecutablesInDir(tempDir, platform);
-                console.log(`Executables found:`, foundExecutables);
-                
-                const mainExecutable = Object.values(foundExecutables)[0];
-                if (!mainExecutable) {
-                    console.log('No executables found, listing all files for debugging');
-                    reject(localization.format(localization.getUI('installer.noExecutableFound'), tempDir, allFiles.join('\n')));
-                    return;
-                }
-                
-                // Copy binary to dumpstorm bin directory
-                if (token.isCancellationRequested) {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
-                    return;
-                }
-                const targetPath = path.join(dumpstormDir, binaryInfo.binaryName);
-                fs.copyFileSync(mainExecutable, targetPath);
-                
-                // Make executable on Unix systems
-                if (platform !== 'win32') {
-                    fs.chmodSync(targetPath, 0o755);
-                }
-                
-                console.log(`Installed ${binaryInfo.toolName} to: ${targetPath}`);
-                
-                progress.report({
-                    increment: 100,
-                    message: localization.format(localization.getUI('toolInstallationCompleted'), binaryInfo.toolName),
-                });
-                
-                // Clean up temp files
-                this.cleanupTempFiles(tempFile, tempDir);
-                
-                // Keep the progress dialog open for a few seconds so user can see completion
-                setTimeout(() => {
-                    if (token.isCancellationRequested) {
-                        reject(localization.getUI('installer.installationCancelledByUser'));
-                    } else {
-                        resolve();
-                    }
-                }, 2000);
-                
-            } catch (extractError: any) {
-                if (token.isCancellationRequested) {
-                    reject(localization.getUI('installer.installationCancelledByUser'));
-                } else {
-                    reject(localization.format(localization.getUI('installer.failedToExtractBinary'), extractError));
-                }
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+                console.log(`Created extraction directory: ${tempDir}`);
             }
             
-        } catch (error) {
-            if (token.isCancellationRequested) {
-                reject(localization.getUI('installer.installationCancelledByUser'));
+            if (isZip) {
+                console.log(`Extracting archive with PowerShell using environment-variable paths`);
+                extractZipWithPowerShell(tempFile, tempDir);
             } else {
-                reject(localization.format(localization.getUI('installer.installationFailed'), error));
+                console.log(`Extracting archive with parameterized tar arguments`);
+                execFileSync('tar', ['-xzf', tempFile, '-C', tempDir], { encoding: 'utf8' });
             }
+            
+            console.log(`Extraction completed to: ${tempDir}`);
+
+            if (token.isCancellationRequested) {
+                reject(new InstallCancelledError());
+                return;
+            }
+            
+            if (!fs.existsSync(tempDir)) {
+                reject(new Error(localization.format(localization.getUI('installer.extractionDirectoryNotCreated'), tempDir)));
+                return;
+            }
+            
+            const tempDirContents = fs.readdirSync(tempDir);
+            console.log(`Extraction directory contents: ${tempDirContents.join(', ')}`);
+            if (tempDirContents.length === 0) {
+                reject(new Error(localization.format(localization.getUI('installer.extractionDirectoryEmpty'), tempDir)));
+                return;
+            }
+            
+            progress.report({
+                increment: 70,
+                message: localization.format(localization.getUI('installingTool'), binaryInfo.toolName),
+            });
+            
+            const allFiles = this.listAllFiles(tempDir);
+            console.log(`All extracted files:\n${allFiles.join('\n')}`);
+            
+            const foundExecutables = this.findExecutablesInDir(tempDir, platform);
+            console.log(`Executables found:`, foundExecutables);
+            
+            const mainExecutable = Object.values(foundExecutables)[0];
+            if (!mainExecutable) {
+                console.log('No executables found, listing all files for debugging');
+                reject(new Error(localization.format(localization.getUI('installer.noExecutableFound'), tempDir, allFiles.join('\n'))));
+                return;
+            }
+            
+            if (token.isCancellationRequested) {
+                reject(new InstallCancelledError());
+                return;
+            }
+            const targetPath = path.join(dumpstormDir, binaryInfo.binaryName);
+            fs.copyFileSync(mainExecutable, targetPath);
+            
+            if (platform !== 'win32') {
+                fs.chmodSync(targetPath, 0o755);
+            }
+            
+            console.log(`Installed ${binaryInfo.toolName} to: ${targetPath}`);
+            
+            progress.report({
+                increment: 100,
+                message: localization.format(localization.getUI('toolInstallationCompleted'), binaryInfo.toolName),
+            });
+            
+            setTimeout(() => resolve(), 2000);
+            
+        } catch (error) {
+            if (token.isCancellationRequested || isInstallCancelledError(error)) {
+                reject(new InstallCancelledError());
+            } else {
+                reject(new Error(localization.format(
+                    localization.getUI('installer.installationFailed'),
+                    error instanceof Error ? error.message : error,
+                )));
+            }
+        } finally {
+            this.cleanupTempFiles(tempFile, tempDir);
         }
     }
 
@@ -402,12 +375,15 @@ export abstract class CurlBaseInstaller {
      * Clean up temporary files
      */
     protected cleanupTempFiles(tempFile: string, tempDir: string): void {
+        if (!tempFile && !tempDir) {
+            return;
+        }
         try {
-            if (fs.existsSync(tempFile)) {
+            if (tempFile && fs.existsSync(tempFile)) {
                 fs.unlinkSync(tempFile);
                 console.log(`Cleaned up existing temp file: ${tempFile}`);
             }
-            if (fs.existsSync(tempDir)) {
+            if (tempDir && fs.existsSync(tempDir)) {
                 fs.rmSync(tempDir, { recursive: true, force: true });
                 console.log(`Cleaned up existing temp dir: ${tempDir}`);
             }
@@ -419,17 +395,17 @@ export abstract class CurlBaseInstaller {
     /**
      * Validate downloaded file
      */
-    protected validateDownloadedFile(tempFile: string, reject: (error: string) => void): boolean {
+    protected validateDownloadedFile(tempFile: string, reject: (error: Error) => void): boolean {
         try {
             const stats = fs.statSync(tempFile);
             console.log(`Downloaded file size: ${stats.size} bytes`);
             if (stats.size === 0) {
-                reject(localization.getUI('installer.downloadedFileEmpty'));
+                reject(new Error(localization.getUI('installer.downloadedFileEmpty')));
                 return false;
             }
             return true;
         } catch (statError) {
-            reject(localization.format(localization.getUI('installer.failedToCheckDownloadedFile'), statError));
+            reject(new Error(localization.format(localization.getUI('installer.failedToCheckDownloadedFile'), statError)));
             return false;
         }
     }

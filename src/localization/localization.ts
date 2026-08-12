@@ -42,20 +42,8 @@ export class LocalizationManager {
         return LocalizationManager.instance;
     }
 
-    private loadCurrentLocale(): void {
-        // First try to get from VS Code settings
-        const config = vscode.workspace.getConfiguration('minidump-parser');
-        const configLocale = config.get<string>('language');
-        
-        if (configLocale) {
-            this.currentLocale = configLocale;
-            return;
-        }
-
-        // Fall back to VS Code's display language
+    private resolveVsCodeDisplayLocale(): string {
         const vscodeLocale = vscode.env.language;
-        
-        // Map VS Code locales to our supported locales
         const localeMapping: { [key: string]: string } = {
             'zh-cn': 'zh-cn',
             'zh-tw': 'zh-cn', // Use simplified Chinese for traditional Chinese
@@ -65,7 +53,19 @@ export class LocalizationManager {
             'en-gb': 'en'
         };
 
-        this.currentLocale = localeMapping[vscodeLocale.toLowerCase()] || this.defaultLocale;
+        return localeMapping[vscodeLocale.toLowerCase()] || this.defaultLocale;
+    }
+
+    private loadCurrentLocale(): void {
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        const configLocale = config.get<string>('language')?.trim();
+
+        if (configLocale && configLocale !== 'auto' && this.availableLocales.includes(configLocale)) {
+            this.currentLocale = configLocale;
+            return;
+        }
+
+        this.currentLocale = this.resolveVsCodeDisplayLocale();
     }
 
     private loadStrings(locale: string): LocalizedStrings {
@@ -114,17 +114,25 @@ export class LocalizationManager {
         }
     }
 
-    public setLocale(locale: string): void {
-        this.currentLocale = locale;
-        this.strings = this.loadStrings(locale);
-        
-        // Save to VS Code settings
+    public async setLocale(locale: string): Promise<void> {
         const config = vscode.workspace.getConfiguration('minidump-parser');
-        config.update('language', locale, vscode.ConfigurationTarget.Global);
+        await config.update('language', locale, vscode.ConfigurationTarget.Global);
+        this.loadCurrentLocale();
+        this.strings = this.loadStrings(this.currentLocale);
     }
 
     public getCurrentLocale(): string {
         return this.currentLocale;
+    }
+
+    /** Raw language setting: `auto`, `en`, or `zh-cn`. */
+    public getLanguagePreference(): string {
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        const configLocale = config.get<string>('language')?.trim();
+        if (configLocale && configLocale !== 'auto' && this.availableLocales.includes(configLocale)) {
+            return configLocale;
+        }
+        return 'auto';
     }
 
     public getAvailableLocales(): string[] {

@@ -42,6 +42,13 @@ export function resolveDownloadUrl(currentUrl: string, location: string): string
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
         throw new DownloadError(`Unsupported redirect protocol: ${resolved.protocol}`, 'INVALID_REDIRECT');
     }
+    const current = new URL(currentUrl);
+    if (current.protocol === 'https:' && resolved.protocol === 'http:') {
+        throw new DownloadError(
+            `Refusing to follow HTTPS to HTTP redirect: ${resolved}`,
+            'INVALID_REDIRECT',
+        );
+    }
     return resolved.toString();
 }
 
@@ -80,18 +87,39 @@ export function downloadFile(
             cancellationDisposable = undefined;
         };
 
+        const abandonHop = (request?: http.ClientRequest, response?: http.IncomingMessage) => {
+            if (request) {
+                request.removeAllListeners('error');
+                request.setTimeout(0);
+                request.destroy();
+            }
+            if (response) {
+                response.removeAllListeners('error');
+                response.resume();
+                response.destroy();
+            }
+        };
+
         const removePartialDestination = () => {
             if (!destinationCreated) {
                 return;
             }
-            try {
-                if (fs.existsSync(destination)) {
-                    fs.unlinkSync(destination);
+            const unlink = () => {
+                try {
+                    if (fs.existsSync(destination)) {
+                        fs.unlinkSync(destination);
+                    }
+                } catch {
+                    // The original download error is more useful than cleanup
+                    // errors, so cleanup failures are intentionally ignored.
                 }
-            } catch {
-                // The original download error is more useful than cleanup
-                // errors, so cleanup failures are intentionally ignored.
+            };
+            if (output) {
+                output.once('close', unlink);
+                output.destroy();
+                return;
             }
+            unlink();
         };
 
         const fail = (error: unknown) => {
@@ -102,7 +130,6 @@ export function downloadFile(
             clearResources();
             activeRequest?.destroy();
             activeResponse?.destroy();
-            output?.destroy();
             removePartialDestination();
             reject(error instanceof Error ? error : new Error(String(error)));
         };
@@ -119,11 +146,6 @@ export function downloadFile(
         const startRequest = (currentUrl: string) => {
             if (settled) {
                 return;
-            }
-
-            if (timeoutHandle) {
-                clearTimeout(timeoutHandle);
-                timeoutHandle = undefined;
             }
 
             if (token?.isCancellationRequested) {
@@ -146,13 +168,18 @@ export function downloadFile(
 
             const transport = parsedUrl.protocol === 'https:' ? https : http;
             const request = transport.get(parsedUrl, response => {
-                activeResponse = response;
+                if (settled) {
+                    response.resume();
+                    return;
+                }
 
+                activeResponse = response;
                 response.once('error', fail);
 
                 if (isRedirectStatusCode(response.statusCode)) {
                     const location = response.headers.location;
-                    response.resume();
+                    const previousRequest = request;
+                    const previousResponse = response;
 
                     if (!location) {
                         fail(new DownloadError(
@@ -173,6 +200,7 @@ export function downloadFile(
                     try {
                         const nextUrl = resolveDownloadUrl(currentUrl, location);
                         redirectCount++;
+                        abandonHop(previousRequest, previousResponse);
                         startRequest(nextUrl);
                     } catch (error) {
                         fail(error);
@@ -192,24 +220,31 @@ export function downloadFile(
 
                 try {
                     output = fs.createWriteStream(destination);
-                    destinationCreated = true;
+                    output.once('open', () => {
+                        destinationCreated = true;
+                    });
                 } catch (error) {
                     fail(error);
                     return;
                 }
 
                 output.once('error', fail);
-                output.once('finish', complete);
+                output.once('close', complete);
                 response.pipe(output);
             });
 
+            if (activeRequest && activeRequest !== request) {
+                abandonHop(activeRequest, activeResponse);
+            }
             activeRequest = request;
-            timeoutHandle = setTimeout(() => {
-                fail(new DownloadError(
-                    `Download timed out after ${timeoutMs} ms`,
-                    'DOWNLOAD_TIMEOUT',
-                ));
-            }, timeoutMs);
+            if (!timeoutHandle) {
+                timeoutHandle = setTimeout(() => {
+                    fail(new DownloadError(
+                        `Download timed out after ${timeoutMs} ms`,
+                        'DOWNLOAD_TIMEOUT',
+                    ));
+                }, timeoutMs);
+            }
             request.setTimeout(timeoutMs, () => {
                 fail(new DownloadError(
                     `Download timed out after ${timeoutMs} ms`,

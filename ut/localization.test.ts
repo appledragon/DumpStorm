@@ -76,6 +76,60 @@ describe('LocalizationManager', () => {
     });
   });
 
+  describe('language preference', () => {
+    const vscode = require('vscode');
+
+    function mockLanguageSetting(value: string | undefined, envLanguage = 'en') {
+      let stored = value;
+      vscode.env.language = envLanguage;
+      vscode.workspace.getConfiguration.mockReturnValue({
+        get: jest.fn((key: string) => key === 'language' ? stored : undefined),
+        update: jest.fn().mockImplementation((_key: string, newValue: string) => {
+          stored = newValue;
+          return Promise.resolve();
+        })
+      });
+    }
+
+    afterEach(() => {
+      vscode.env.language = 'en';
+      vscode.workspace.getConfiguration.mockReturnValue({
+        get: jest.fn().mockReturnValue(undefined),
+        update: jest.fn().mockResolvedValue(undefined)
+      });
+      manager.reload();
+    });
+
+    it('follows VS Code display language when the setting is auto', () => {
+      mockLanguageSetting('auto', 'zh-cn');
+      manager.reload();
+      expect(manager.getLanguagePreference()).toBe('auto');
+      expect(manager.getCurrentLocale()).toBe('zh-cn');
+    });
+
+    it('follows VS Code display language when the setting is empty', () => {
+      mockLanguageSetting('', 'zh-cn');
+      manager.reload();
+      expect(manager.getLanguagePreference()).toBe('auto');
+      expect(manager.getCurrentLocale()).toBe('zh-cn');
+    });
+
+    it('uses an explicit locale instead of VS Code display language', () => {
+      mockLanguageSetting('en', 'zh-cn');
+      manager.reload();
+      expect(manager.getLanguagePreference()).toBe('en');
+      expect(manager.getCurrentLocale()).toBe('en');
+    });
+
+    it('writes auto to settings and reloads from VS Code display language', async () => {
+      mockLanguageSetting('en', 'zh-cn');
+      manager.reload();
+      await manager.setLocale('auto');
+      expect(manager.getLanguagePreference()).toBe('auto');
+      expect(manager.getCurrentLocale()).toBe('zh-cn');
+    });
+  });
+
   describe('getFormattedValue', () => {
     it('should format value template with arguments', () => {
       // This calls getValue then format

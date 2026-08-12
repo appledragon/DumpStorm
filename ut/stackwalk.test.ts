@@ -431,16 +431,16 @@ describe('buildSymbolMatchReport', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  function writeSym(moduleName: string, debugId: string): void {
-    const dir = path.join(tmpRoot, moduleName, debugId);
+  function writeSym(debugFile: string, debugId: string): void {
+    const dir = path.join(tmpRoot, debugFile, debugId);
     fs.mkdirSync(dir, { recursive: true });
-    const baseName = moduleName.replace(/\.(pdb|exe|dll)$/i, '');
-    fs.writeFileSync(path.join(dir, `${baseName}.sym`), 'MODULE windows x86_64 ' + debugId + ' ' + moduleName + '\n');
+    const baseName = debugFile.replace(/\.(pdb|exe|dll)$/i, '');
+    fs.writeFileSync(path.join(dir, `${baseName}.sym`), 'MODULE windows x86_64 ' + debugId + ' ' + debugFile + '\n');
   }
 
   it('should report matched, missing, and version-mismatched modules', () => {
-    writeSym('app.exe', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
-    writeSym('libfoo.dll', 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB1'); // wrong id stored
+    writeSym('app.pdb', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
+    writeSym('libfoo.pdb', 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB1'); // wrong id stored
 
     const machineDump = parseMachineFormat(`Module|app.exe|1.0|app.pdb|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1|0x400000|0x500000|1
 Module|libfoo.dll|1.0|libfoo.pdb|CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1|0x600000|0x700000|0
@@ -467,7 +467,7 @@ Module|missing.dll|1.0|missing.pdb|DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD1|0x800000|0x
   });
 
   it('should render Symbol Match line in cleaned output when context is provided', () => {
-    writeSym('app.exe', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
+    writeSym('app.pdb', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1');
     const machineDump = parseMachineFormat(`Module|app.exe|1.0|app.pdb|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1|0x400000|0x500000|1
 Module|libfoo.dll|1.0|libfoo.pdb|CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1|0x600000|0x700000|0
 `);

@@ -306,10 +306,13 @@
     "manualGuideOpened": "Manual installation guide opened. Follow the instructions and restart VS Code when done.",
     "languageChanged": "Language changed to {0}. Tooltips will now use the new language.",
     "languageChangedChinese": "语言已切换为简体中文。工具提示现在将使用中文显示。",
+    "languageChangedAuto": "Language now follows the VS Code display language.",
     "languageSwitchError": "Error switching language: {0}",
     "chooseLanguage": "Choose language",
     "english": "English",
     "chineseSimplified": "简体中文",
+    "autoLanguage": "Auto",
+    "followVsCodeLanguage": "Follow VS Code display language",
     "nativeEnglishName": "English",
     "nativeChineseName": "Simplified Chinese",
     "clickToSwitch": "(Click to switch)",
@@ -461,7 +464,9 @@
     "dumpFileAnalysisPartial": "Dump file analysis is partial for: {0}. The stackwalk tool reported serious diagnostics.",
     "dumpFileAnalysisInvalid": "Dump file analysis is invalid for: {0}. No usable stack frames were produced.",
     "partialAnalysisResult": "Serious stackwalk diagnostics were reported; treat this output as partial.",
-    "invalidAnalysisResult": "No usable stack frames were produced; the dump could not be analyzed reliably."
+    "invalidAnalysisResult": "No usable stack frames were produced; the dump could not be analyzed reliably.",
+    "processError": "Process error: {0}",
+    "stackwalkDiagnostic": "Stackwalk diagnostic: {0}"
     ,"downloadingTool": "Downloading {0} binary file..."
     ,"extractingTool": "Extracting {0} binary files..."
     ,"installingTool": "Installing {0} to .dumpstorm/bin directory..."

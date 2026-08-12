@@ -192,7 +192,11 @@ function checkLocales(manifest, sourceText) {
     }
 
     const languageProperty = getManifestConfiguration(manifest)['minidump-parser.language'];
-    const manifestLocales = new Set(Array.isArray(languageProperty?.enum) ? languageProperty.enum : []);
+    const specialLanguageValues = new Set(['auto']);
+    const languageEnumValues = Array.isArray(languageProperty?.enum) ? languageProperty.enum : [];
+    const manifestLocales = new Set(
+        languageEnumValues.filter(value => !specialLanguageValues.has(value)),
+    );
     const fileLocales = new Set(localeData.keys());
     const missingFiles = difference(manifestLocales, fileLocales);
     const unlistedFiles = difference(fileLocales, manifestLocales);
