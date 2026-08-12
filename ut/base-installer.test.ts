@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { BaseInstaller, BinaryInfo, ToolConfig } from '../src/tools/base-installer';
+import {
+  BaseInstaller,
+  BinaryInfo,
+  appendTempSuffix,
+  getPowerShellArchiveArgs,
+  ToolConfig,
+} from '../src/tools/base-installer';
 
 // Mock VS Code
 jest.mock('vscode', () => ({
@@ -41,7 +47,8 @@ jest.mock('https', () => ({
 // Mock child_process
 jest.mock('child_process', () => ({
   spawn: jest.fn(),
-  execSync: jest.fn()
+  execSync: jest.fn(),
+  execFileSync: jest.fn()
 }));
 
 // Mock localization
@@ -274,5 +281,30 @@ describe('BaseInstaller', () => {
       const message = installer['getSuccessMessage']();
       expect(message).toBe('Test tool installed successfully');
     });
+  });
+
+  it('returns false without installing when the confirmation dialog is dismissed', async () => {
+    const vscodeMock = require('vscode');
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce(undefined);
+
+    await expect(installer.install()).resolves.toBe(false);
+    expect(vscodeMock.window.withProgress).not.toHaveBeenCalled();
+  });
+
+  it('passes Windows archive paths as arguments even with spaces and quotes', () => {
+    const archivePath = "C:\\Crash Tools\\vendor's\\tool.zip";
+    const destinationPath = "C:\\Crash Tools\\extract'ed";
+    const args = getPowerShellArchiveArgs(archivePath, destinationPath);
+
+    expect(args).toContain(archivePath);
+    expect(args).toContain(destinationPath);
+    expect(args[args.length - 2]).toBe(archivePath);
+    expect(args[args.length - 1]).toBe(destinationPath);
+    expect(args.join(' ')).not.toContain(`'${archivePath}'`);
+  });
+
+  it('keeps the archive extension after adding a temporary suffix', () => {
+    expect(appendTempSuffix('breakpad-temp.zip', '123')).toBe('breakpad-temp-123.zip');
+    expect(appendTempSuffix('tool.tar.gz', '456')).toBe('tool.tar-456.gz');
   });
 });

@@ -1,5 +1,6 @@
 import * as os from 'os';
 import * as path from 'path';
+import { EventEmitter } from 'events';
 import { BinaryInfo, ToolConfig } from '../src/tools/base-installer';
 import { CurlBaseInstaller } from '../src/tools/curl-installer';
 
@@ -141,6 +142,14 @@ describe('CurlBaseInstaller', () => {
     jest.clearAllMocks();
   });
 
+  function createMockCurlProcess() {
+    const child = new EventEmitter() as any;
+    child.stderr = new EventEmitter();
+    child.stderr.setEncoding = jest.fn();
+    child.kill = jest.fn();
+    return child;
+  }
+
   describe('getToolConfig', () => {
     it('should return correct tool configuration', () => {
       const config = installer.testGetToolConfig();
@@ -195,6 +204,9 @@ describe('CurlBaseInstaller', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.statSync.mockReturnValue({ size: 1024 });
       mockFs.readdirSync.mockReturnValue(['test-curl-tool']);
+      const child = createMockCurlProcess();
+      mockChildProcess.spawn.mockReturnValue(child);
+      setImmediate(() => child.emit('close', 0, null));
 
       const binaryInfo = installer.testGetBinaryInfo('linux', 'x64');
       
@@ -210,16 +222,20 @@ describe('CurlBaseInstaller', () => {
       // Wait for setTimeout resolve
       await new Promise(resolve => setTimeout(resolve, 2100));
 
-      expect(mockChildProcess.execFileSync).toHaveBeenCalled();
+      expect(mockChildProcess.spawn).toHaveBeenCalledWith(
+        'curl',
+        expect.arrayContaining(['--location', '--max-redirs', '10']),
+        expect.objectContaining({ stdio: ['ignore', 'ignore', 'pipe'] })
+      );
       expect(mockProgress.report).toHaveBeenCalled();
       expect(mockReject).not.toHaveBeenCalled();
     });
 
     it('should handle curl download failure', async () => {
-      // Mock failed execFileSync (curl download fails)
-      mockChildProcess.execFileSync.mockImplementation(() => {
-        throw new Error('curl: (7) Failed to connect to host');
-      });
+      const child = createMockCurlProcess();
+      mockChildProcess.spawn.mockReturnValue(child);
+      child.stderr.emit('data', 'curl: (7) Failed to connect to host');
+      setImmediate(() => child.emit('close', 7, null));
 
       const binaryInfo = installer.testGetBinaryInfo('linux', 'x64');
       
@@ -258,6 +274,9 @@ describe('CurlBaseInstaller', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.statSync.mockReturnValue({ size: 1024 });
       mockFs.readdirSync.mockReturnValue(['test-curl-tool']);
+      const child = createMockCurlProcess();
+      mockChildProcess.spawn.mockReturnValue(child);
+      setImmediate(() => child.emit('close', 0, null));
 
       const binaryInfo = installer.testGetBinaryInfo('linux', 'x64');
       
@@ -288,5 +307,13 @@ describe('CurlBaseInstaller', () => {
       expect(installer['getInstallingMessage']()).toBe('Installing test curl tool');
       expect(installer['getSuccessMessage']()).toBe('Test curl tool installed successfully');
     });
+  });
+
+  it('returns false without starting curl when confirmation is dismissed', async () => {
+    const vscodeMock = require('vscode');
+    vscodeMock.window.showInformationMessage.mockResolvedValueOnce(undefined);
+
+    await expect(installer.install()).resolves.toBe(false);
+    expect(mockChildProcess.spawn).not.toHaveBeenCalled();
   });
 });

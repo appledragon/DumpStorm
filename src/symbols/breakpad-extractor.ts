@@ -1,8 +1,8 @@
 import { execFile } from 'child_process';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import { getCustomDumpSymsPath, isValidDumpSymsPath } from '../config/config';
+import { localization } from '../localization/localization';
 
 /**
  * Result of running `dump_syms` on a single binary.
@@ -23,9 +23,8 @@ const DUMP_SYMS_BINARY = process.platform === 'win32' ? 'dump_syms.exe' : 'dump_
  * we only consume what the user has on their PATH or explicitly configured.
  */
 export function getDumpSymsCommand(): string {
-    const cfg = vscode.workspace.getConfiguration('minidump-parser');
-    const custom = cfg.get<string>('customDumpSymsPath');
-    if (custom && fs.existsSync(custom)) {
+    const custom = getCustomDumpSymsPath();
+    if (custom && isValidDumpSymsPath(custom)) {
         return custom;
     }
     return DUMP_SYMS_BINARY;
@@ -53,7 +52,7 @@ export async function extractBreakpadSymbols(
     symbolPath: string,
 ): Promise<BreakpadExtractionResult> {
     if (!fs.existsSync(binaryPath)) {
-        throw new Error(`Binary not found: ${binaryPath}`);
+        throw new Error(localization.format(localization.getUI('breakpadBinaryNotFound'), binaryPath));
     }
     if (!fs.existsSync(symbolPath)) {
         fs.mkdirSync(symbolPath, { recursive: true });
@@ -63,10 +62,10 @@ export async function extractBreakpadSymbols(
     const stdout = await runDumpSyms(cmd, binaryPath);
     const header = parseModuleHeader(stdout);
     if (!header) {
-        throw new Error(
-            `dump_syms produced no MODULE header for ${path.basename(binaryPath)}; ` +
-            `the binary may be stripped or unsupported.`,
-        );
+        throw new Error(localization.format(
+            localization.getUI('dumpSymsNoModuleHeader'),
+            path.basename(binaryPath),
+        ));
     }
 
     const moduleDir = path.join(symbolPath, header.moduleName, header.debugId);
@@ -113,13 +112,14 @@ function runDumpSyms(cmd: string, binaryPath: string): Promise<string> {
             (error, stdout) => {
                 if (error) {
                     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                        reject(new Error(
-                            `dump_syms not found. Install Breakpad's dump_syms and ensure ` +
-                            `it is on PATH, or set "minidump-parser.customDumpSymsPath".`,
-                        ));
+                        reject(new Error(localization.getUI('dumpSymsNotFound')));
                         return;
                     }
-                    reject(new Error(`dump_syms failed for ${path.basename(binaryPath)}: ${error.message}`));
+                    reject(new Error(localization.format(
+                        localization.getUI('dumpSymsFailedForFile'),
+                        path.basename(binaryPath),
+                        error.message,
+                    )));
                     return;
                 }
                 resolve(stdout);
@@ -181,5 +181,3 @@ function collectBinaries(directoryPath: string): string[] {
 
 // Tiny helper exposed for tests
 export const _internal = { parseModuleHeader, collectBinaries };
-// Avoid unused-import warning when bundlers tree-shake
-void os;

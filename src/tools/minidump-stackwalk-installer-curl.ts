@@ -31,7 +31,7 @@ class MinidumpStackwalkCurlInstaller extends CurlBaseInstaller {
     }
 
     protected getInstallingMessage(): string {
-        return localization.getUI('installingMinidumpStackwalkAlt') || 'Installing minidump_stackwalk...';
+        return localization.getUI('installingMinidumpStackwalkAlt');
     }
 
     protected getSuccessMessage(): string {
@@ -81,7 +81,7 @@ class MinidumpStackwalkCurlInstaller extends CurlBaseInstaller {
     /**
      * Override install method to add user confirmation
      */
-    public async install(): Promise<void> {
+    public async install(): Promise<boolean> {
         const choice = await vscode.window.showInformationMessage(
             this.getStartingInstallationMessage(),
             { modal: true },
@@ -90,18 +90,17 @@ class MinidumpStackwalkCurlInstaller extends CurlBaseInstaller {
         );
         
         if (choice !== localization.getUI('yesInstall')) {
-            return;
+            return false;
         }
 
-        // Call parent install method
-        await super.install();
+        return this.installConfirmed();
     }
 }
 
 /**
  * Curl-based installer with better error handling and reliability
  */
-export async function installMinidumpStackwalkWithCurl(): Promise<void> {
+export async function installMinidumpStackwalkWithCurl(): Promise<boolean> {
     const installer = new MinidumpStackwalkCurlInstaller();
-    await installer.install();
+    return installer.install();
 }

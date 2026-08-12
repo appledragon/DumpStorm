@@ -3,12 +3,20 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { RegisterTooltipProvider } from './analysis/registers';
 import { analyzeDumpFile } from './analysis/stackwalk';
-import { DEFAULT_CONFIG, isValidLlvmNmPath, isValidMinidumpStackwalkPath, isValidNmPath } from './config/config';
+import {
+    DEFAULT_CONFIG,
+    isValidDumpSymsPath,
+    isValidLlvmNmPath,
+    isValidLlvmUndnamePath,
+    isValidMinidumpStackwalkPath,
+    isValidNmPath,
+} from './config/config';
 import { localization } from './localization/localization';
 import { enhanceStackTraceWithSymbols } from './symbols/enhancer';
 import { extractSymbolsFromBinary, extractSymbolsFromDirectory } from './symbols/extractor';
 import { extractBreakpadSymbols, extractBreakpadSymbolsFromDirectory, isDumpSymsAvailable } from './symbols/breakpad-extractor';
 import { clearSymbolCache } from './symbols/enhancer';
+import { resetMsvcDemangleAvailability } from './symbols/msvc-demangle';
 import { installLlvmNmWithCurl } from './tools/llvm-nm-installer-curl';
 import { BreakpadPanelProvider } from './ui/panel';
 
@@ -29,6 +37,14 @@ export function activate(context: vscode.ExtensionContext) {
         ],
         registerTooltipProvider
     );
+    const configurationDisposable = vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('minidump-parser.customLlvmUndnamePath')) {
+            resetMsvcDemangleAvailability();
+        }
+        if (event.affectsConfiguration('minidump-parser')) {
+            panelProvider.refresh();
+        }
+    });
 
     // Register set symbol path command
     const setSymbolPathCommand = vscode.commands.registerCommand('minidump-parser.setSymbolPath', async () => {
@@ -36,7 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
             canSelectFiles: false,
             canSelectFolders: true,
             canSelectMany: false,
-            openLabel: 'Select Symbol Directory'
+            openLabel: localization.getUI('selectSymbolDirectory')
         });
 
         if (folders && folders.length > 0) {
@@ -56,7 +72,10 @@ export function activate(context: vscode.ExtensionContext) {
             
             // Show file picker for dump files
             const openDialogOptions: vscode.OpenDialogOptions = {
-                filters: { 'Dump Files': ['dmp', 'dump'], 'All Files': ['*'] },
+                filters: {
+                    [localization.getUI('dumpFilesFilter')]: ['dmp', 'dump'],
+                    [localization.getUI('allFilesFilter')]: ['*'],
+                },
                 canSelectMany: false,
                 title: localization.getUI('selectCrashDumpFile')
             };
@@ -74,8 +93,14 @@ export function activate(context: vscode.ExtensionContext) {
 
             const dumpPath = dumpUri[0].fsPath;
             
-            // Check if dump file exists
-            if (!fs.existsSync(dumpPath)) {
+            // A directory or special path is not a valid dump input.
+            let isDumpFile = false;
+            try {
+                isDumpFile = fs.statSync(dumpPath).isFile();
+            } catch {
+                isDumpFile = false;
+            }
+            if (!isDumpFile) {
                 vscode.window.showErrorMessage(localization.format(localization.getUI('dumpFileNotFound'), dumpPath));
                 return;
             }
@@ -96,7 +121,7 @@ export function activate(context: vscode.ExtensionContext) {
                         canSelectFiles: false,
                         canSelectFolders: true,
                         canSelectMany: false,
-                        openLabel: 'Select Symbol Directory'
+                        openLabel: localization.getUI('selectSymbolDirectory')
                     });
                     
                     if (folders && folders.length > 0) {
@@ -125,6 +150,12 @@ export function activate(context: vscode.ExtensionContext) {
         } catch (error: any) {
             vscode.window.showErrorMessage(localization.format(localization.getUI('errorAnalyzingDumpFile'), error.message || error));
         }
+    });
+
+    // Keep the contributed analyzeDump command useful for Command Palette
+    // users while sharing the same file-picker and analysis flow.
+    const analyzeDumpCommand = vscode.commands.registerCommand('minidump-parser.analyzeDump', async () => {
+        await vscode.commands.executeCommand('minidump-parser.openDumpFile');
     });
 
     // Register extract symbols command
@@ -171,8 +202,8 @@ export function activate(context: vscode.ExtensionContext) {
                 
                 const binaryUri = await vscode.window.showOpenDialog({
                     filters: { 
-                        'Executable Files': ['exe', 'dll', 'so', 'dylib', 'app'], 
-                        'All Files': ['*'] 
+                        [localization.getUI('executableFilesFilter')]: ['exe', 'dll', 'so', 'dylib', 'app'],
+                        [localization.getUI('allFilesFilter')]: ['*']
                     },
                     canSelectMany: false,
                     title: localization.getUI('selectBinaryFile'),
@@ -307,7 +338,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const fileUri = await vscode.window.showOpenDialog({
-            filters: { 'Executable Files': ['exe', '*'], 'All Files': ['*'] },
+            filters: {
+                [localization.getUI('executableFilesFilter')]: ['exe', '*'],
+                [localization.getUI('allFilesFilter')]: ['*'],
+            },
             canSelectMany: false,
             title: localization.getUI('selectMinidumpStackwalkExecutable'),
             defaultUri: defaultUri
@@ -340,7 +374,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const fileUri = await vscode.window.showOpenDialog({
-            filters: { 'Executable Files': ['exe', '*'], 'All Files': ['*'] },
+            filters: {
+                [localization.getUI('executableFilesFilter')]: ['exe', '*'],
+                [localization.getUI('allFilesFilter')]: ['*'],
+            },
             canSelectMany: false,
             title: localization.getUI('selectNmExecutable'),
             defaultUri: defaultUri
@@ -373,7 +410,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const fileUri = await vscode.window.showOpenDialog({
-            filters: { 'Executable Files': ['exe', '*'], 'All Files': ['*'] },
+            filters: {
+                [localization.getUI('executableFilesFilter')]: ['exe', '*'],
+                [localization.getUI('allFilesFilter')]: ['*'],
+            },
             canSelectMany: false,
             title: localization.getUI('selectLlvmNmExecutable'),
             defaultUri: defaultUri
@@ -396,6 +436,75 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    const setCustomDumpSymsPathCommand = vscode.commands.registerCommand('minidump-parser.setCustomDumpSymsPath', async () => {
+        const lastToolPath = context.globalState.get<string>('lastToolPath');
+        const defaultUri = lastToolPath && fs.existsSync(lastToolPath)
+            ? vscode.Uri.file(path.dirname(lastToolPath))
+            : undefined;
+        const fileUri = await vscode.window.showOpenDialog({
+            filters: {
+                [localization.getUI('executableFilesFilter')]: ['exe', '*'],
+                [localization.getUI('allFilesFilter')]: ['*'],
+            },
+            canSelectMany: false,
+            title: localization.getUI('selectDumpSymsExecutable'),
+            defaultUri,
+        });
+
+        if (!fileUri || fileUri.length === 0) {
+            return;
+        }
+
+        const executablePath = fileUri[0].fsPath;
+        await context.globalState.update('lastToolPath', executablePath);
+        if (!isValidDumpSymsPath(executablePath)) {
+            vscode.window.showErrorMessage(localization.getUI('invalidDumpSymsExecutable'));
+            return;
+        }
+
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        await config.update('customDumpSymsPath', executablePath, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(
+            localization.format(localization.getUI('customDumpSymsPathSet'), executablePath),
+        );
+        panelProvider.refresh();
+    });
+
+    const setCustomLlvmUndnamePathCommand = vscode.commands.registerCommand('minidump-parser.setCustomLlvmUndnamePath', async () => {
+        const lastToolPath = context.globalState.get<string>('lastToolPath');
+        const defaultUri = lastToolPath && fs.existsSync(lastToolPath)
+            ? vscode.Uri.file(path.dirname(lastToolPath))
+            : undefined;
+        const fileUri = await vscode.window.showOpenDialog({
+            filters: {
+                [localization.getUI('executableFilesFilter')]: ['exe', '*'],
+                [localization.getUI('allFilesFilter')]: ['*'],
+            },
+            canSelectMany: false,
+            title: localization.getUI('selectLlvmUndnameExecutable'),
+            defaultUri,
+        });
+
+        if (!fileUri || fileUri.length === 0) {
+            return;
+        }
+
+        const executablePath = fileUri[0].fsPath;
+        await context.globalState.update('lastToolPath', executablePath);
+        if (!isValidLlvmUndnamePath(executablePath)) {
+            vscode.window.showErrorMessage(localization.getUI('invalidLlvmUndnameExecutable'));
+            return;
+        }
+
+        const config = vscode.workspace.getConfiguration('minidump-parser');
+        await config.update('customLlvmUndnamePath', executablePath, vscode.ConfigurationTarget.Global);
+        resetMsvcDemangleAvailability();
+        vscode.window.showInformationMessage(
+            localization.format(localization.getUI('customLlvmUndnamePathSet'), executablePath),
+        );
+        panelProvider.refresh();
+    });
+
     const resetCustomPathsCommand = vscode.commands.registerCommand('minidump-parser.resetCustomPaths', async () => {
         const response = await vscode.window.showWarningMessage(
             localization.getUI('resetCustomPathsConfirm'),
@@ -407,6 +516,9 @@ export function activate(context: vscode.ExtensionContext) {
             await config.update('customMinidumpStackwalkPath', undefined, vscode.ConfigurationTarget.Global);
             await config.update('customNmPath', undefined, vscode.ConfigurationTarget.Global);
             await config.update('customLlvmNmPath', undefined, vscode.ConfigurationTarget.Global);
+            await config.update('customDumpSymsPath', undefined, vscode.ConfigurationTarget.Global);
+            await config.update('customLlvmUndnamePath', undefined, vscode.ConfigurationTarget.Global);
+            resetMsvcDemangleAvailability();
             vscode.window.showInformationMessage(localization.getUI('customPathsReset'));
             panelProvider.refresh();
         }
@@ -437,6 +549,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Register switch dump file command
     const switchDumpFileCommand = vscode.commands.registerCommand('minidump-parser.switchDumpFile', async (filePath: string) => {
         try {
+            let isDumpFile = false;
+            try {
+                isDumpFile = fs.statSync(filePath).isFile();
+            } catch {
+                isDumpFile = false;
+            }
+            if (!isDumpFile) {
+                vscode.window.showErrorMessage(localization.format(localization.getUI('dumpFileNotFound'), filePath));
+                return;
+            }
             // Switch to the specified dump file
             panelProvider.switchToDumpFile(filePath);
             
@@ -469,7 +591,9 @@ export function activate(context: vscode.ExtensionContext) {
             const fileName = path.basename(filePath);
             vscode.window.showInformationMessage(localization.format(localization.getUI('dumpFileClosed'), fileName));
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Error closing dump file: ${error.message || error}`);
+            vscode.window.showErrorMessage(
+                localization.format(localization.getUI('closeDumpFileError'), error.message || error),
+            );
         }
     });
 
@@ -513,11 +637,11 @@ export function activate(context: vscode.ExtensionContext) {
                 switch (locale) {
                     case 'en':
                         localizedName = localization.getUI('english');
-                        nativeName = 'English';
+                        nativeName = localization.getUI('nativeEnglishName');
                         break;
                     case 'zh-cn':
                         localizedName = localization.getUI('chineseSimplified');
-                        nativeName = 'Simplified Chinese';
+                        nativeName = localization.getUI('nativeChineseName');
                         break;
                     default:
                         localizedName = locale;
@@ -527,14 +651,16 @@ export function activate(context: vscode.ExtensionContext) {
                 
                 return {
                     label: `${localizedName} (${nativeName})`,
-                    description: isActive ? '✓ Current Language' : locale.toUpperCase(),
-                    detail: isActive ? 'Currently selected language for tooltips' : `Switch to ${localizedName}`,
+                    description: isActive ? localization.getUI('currentLanguage') : locale.toUpperCase(),
+                    detail: isActive
+                        ? localization.getUI('languageTooltip')
+                        : localization.format(localization.getUI('switchToLanguage'), localizedName),
                     locale: locale
                 };
             });
 
             const selectedItem = await vscode.window.showQuickPick(languageItems, {
-                title: 'Select Language / 选择语言',
+                title: localization.getUI('selectLanguage'),
                 placeHolder: localization.getUI('chooseLanguage'),
                 ignoreFocusOut: false
             });
@@ -612,18 +738,24 @@ Stack trace:
     // Register all commands
     const extractBreakpadSymbolsCommand = vscode.commands.registerCommand('minidump-parser.extractBreakpadSymbols', async () => {
         if (!(await isDumpSymsAvailable())) {
-            vscode.window.showErrorMessage(
-                'dump_syms is not available. Install Breakpad\u2019s dump_syms and ensure it is on PATH, ' +
-                'or set "minidump-parser.customDumpSymsPath".',
-            );
+            vscode.window.showErrorMessage(localization.getUI('dumpSymsUnavailable'));
             return;
         }
         const choice = await vscode.window.showQuickPick(
             [
-                { label: 'Single binary', detail: 'Pick one .exe / .dll / .so / .dylib' },
-                { label: 'Directory (recursive)', detail: 'Run dump_syms over every binary under a folder' },
+                {
+                    label: localization.getUI('singleBreakpadBinary'),
+                    detail: localization.getUI('singleBreakpadBinaryDetail'),
+                },
+                {
+                    label: localization.getUI('directoryBreakpad'),
+                    detail: localization.getUI('directoryBreakpadDetail'),
+                },
             ],
-            { title: 'Breakpad symbol extraction', placeHolder: 'Choose extraction mode' },
+            {
+                title: localization.getUI('breakpadExtraction'),
+                placeHolder: localization.getUI('chooseBreakpadExtractionMode'),
+            },
         );
         if (!choice) {
             return;
@@ -635,49 +767,66 @@ Stack trace:
         }
 
         try {
-            if (choice.label === 'Single binary') {
+            if (choice.label === localization.getUI('singleBreakpadBinary')) {
                 const picked = await vscode.window.showOpenDialog({
                     canSelectMany: false,
-                    filters: { 'Executable Files': ['exe', 'dll', 'so', 'dylib'], 'All Files': ['*'] },
-                    title: 'Select binary for dump_syms',
+                    filters: {
+                        [localization.getUI('executableFilesFilter')]: ['exe', 'dll', 'so', 'dylib'],
+                        [localization.getUI('allFilesFilter')]: ['*'],
+                    },
+                    title: localization.getUI('selectBreakpadBinary'),
                 });
                 if (!picked || picked.length === 0) {
                     return;
                 }
                 const result = await extractBreakpadSymbols(picked[0].fsPath, symbolPath);
                 vscode.window.showInformationMessage(
-                    `Extracted .sym for ${result.moduleName} (${result.debugId.slice(0, 8)}\u2026)`,
+                    localization.format(
+                        localization.getUI('breakpadSymbolExtracted'),
+                        result.moduleName,
+                        result.debugId.slice(0, 8),
+                    ),
                 );
             } else {
                 const picked = await vscode.window.showOpenDialog({
                     canSelectFiles: false,
                     canSelectFolders: true,
                     canSelectMany: false,
-                    title: 'Select directory to scan with dump_syms',
+                    title: localization.getUI('selectBreakpadDirectory'),
                 });
                 if (!picked || picked.length === 0) {
                     return;
                 }
                 const { succeeded, failed } = await extractBreakpadSymbolsFromDirectory(picked[0].fsPath, symbolPath);
                 vscode.window.showInformationMessage(
-                    `dump_syms: ${succeeded.length} succeeded, ${failed.length} failed.`,
+                    localization.format(
+                        localization.getUI('breakpadExtractionSummary'),
+                        succeeded.length,
+                        failed.length,
+                    ),
                 );
             }
         } catch (error: any) {
-            vscode.window.showErrorMessage(`dump_syms failed: ${error?.message ?? error}`);
+            vscode.window.showErrorMessage(
+                localization.format(localization.getUI('breakpadExtractionFailed'), error?.message ?? error),
+            );
         }
     });
 
     context.subscriptions.push(
         hoverDisposable,
+        configurationDisposable,
         setSymbolPathCommand,
         openDumpFileCommand,
+        analyzeDumpCommand,
         extractSymbolsCommand,
         extractBreakpadSymbolsCommand,
         enhanceStackTraceCommand,
         setCustomMinidumpStackwalkPathCommand,
         setCustomNmPathCommand,
         setCustomLlvmNmPathCommand,
+        setCustomDumpSymsPathCommand,
+        setCustomLlvmUndnamePathCommand,
         resetCustomPathsCommand,
         installStackwalkCommand,
         installLlvmNmCommand,
@@ -691,10 +840,11 @@ Stack trace:
         vscode.commands.registerCommand('minidump-parser.about', () => {
             const version = context.extension.packageJSON.version || 'unknown';
             vscode.window.showInformationMessage(
-                `Minidump Parser\n\nVersion: ${version}\nAuthor: AppleDragon\n\nGitHub: https://github.com/appledragon/DumpStorm`,
-                'GitHub', 'Close'
+                localization.format(localization.getUI('aboutMessage'), version),
+                localization.getUI('github'),
+                localization.getUI('close'),
             ).then(choice => {
-                if (choice === 'GitHub') {
+                if (choice === localization.getUI('github')) {
                     vscode.env.openExternal(vscode.Uri.parse('https://github.com/appledragon/DumpStorm'));
                 }
             });

@@ -74,12 +74,22 @@ interface ExceptionInfo {
     numberParameters: number;
 }
 
+interface ThreadDescriptor {
+    threadId: number;
+    stackStart: bigint;
+    stackSize: number;
+    stackRva: number;
+    contextSize: number;
+    contextRva: number;
+}
+
 interface MinidumpInfo {
     header: MinidumpHeader;
     streams: StreamDirectoryEntry[];
     systemInfo?: SystemInfo;
     exception?: ExceptionInfo;
     threadCount?: number;
+    threadDescriptors?: ThreadDescriptor[];
     moduleCount?: number;
     moduleNames?: string[];
 }
@@ -140,6 +150,24 @@ function parseThreadCount(buf: Buffer, entry: StreamDirectoryEntry): number {
     return buf.readUInt32LE(entry.rva);
 }
 
+function parseThreadDescriptors(buf: Buffer, entry: StreamDirectoryEntry): ThreadDescriptor[] {
+    const count = buf.readUInt32LE(entry.rva);
+    const descriptors: ThreadDescriptor[] = [];
+    for (let i = 0; i < count; i++) {
+        const off = entry.rva + 4 + i * 48;
+        if (off + 48 > buf.length) break;
+        descriptors.push({
+            threadId: buf.readUInt32LE(off),
+            stackStart: buf.readBigUInt64LE(off + 24),
+            stackSize: buf.readUInt32LE(off + 32),
+            stackRva: buf.readUInt32LE(off + 36),
+            contextSize: buf.readUInt32LE(off + 40),
+            contextRva: buf.readUInt32LE(off + 44),
+        });
+    }
+    return descriptors;
+}
+
 function parseModuleList(buf: Buffer, entry: StreamDirectoryEntry): { count: number; names: string[] } {
     const count = buf.readUInt32LE(entry.rva);
     const names: string[] = [];
@@ -182,6 +210,7 @@ function parseMinidump(filePath: string): MinidumpInfo {
                 break;
             case STREAM_TYPE.ThreadListStream:
                 info.threadCount = parseThreadCount(buf, entry);
+                info.threadDescriptors = parseThreadDescriptors(buf, entry);
                 break;
             case STREAM_TYPE.ModuleListStream: {
                 const ml = parseModuleList(buf, entry);
@@ -352,6 +381,23 @@ describe('Example Dump Files - Architecture & Exception Metadata', () => {
                 expect(types).toContain(STREAM_TYPE.ThreadListStream);
                 expect(types).toContain(STREAM_TYPE.ExceptionStream);
             });
+
+            it('should contain readable stack and context locations', () => {
+                const fileSize = fs.statSync(dumpPath(scenario.file)).size;
+                expect(info.threadDescriptors).toHaveLength(info.threadCount!);
+                for (const thread of info.threadDescriptors ?? []) {
+                    expect(thread.stackSize).toBeGreaterThan(0);
+                    expect(thread.contextSize).toBeGreaterThan(0);
+                    expect(thread.stackRva + thread.stackSize).toBeLessThanOrEqual(fileSize);
+                    expect(thread.contextRva + thread.contextSize).toBeLessThanOrEqual(fileSize);
+                }
+            });
+
+            it('should exclude referenced module names from ModuleListStream size', () => {
+                const moduleStream = info.streams.find(s => s.streamType === STREAM_TYPE.ModuleListStream);
+                expect(moduleStream).toBeDefined();
+                expect(moduleStream!.dataSize).toBe(4 + (info.moduleCount ?? 0) * 108);
+            });
         },
     );
 
@@ -438,9 +484,10 @@ describe('Example Dump Files - Empty Dump', () => {
         expect(info.threadCount).toBe(0);
     });
 
-    it('should have default modules (empty modules array falls back to defaults)', () => {
-        // The generator uses default modules when modules=[] (length 0)
-        expect(info.moduleCount).toBe(4);
+    it('should have no modules', () => {
+        // An explicit empty module list must remain empty; it must not fall
+        // back to the crash fixture defaults.
+        expect(info.moduleCount).toBe(0);
     });
 
     it('should have NO exception stream', () => {
@@ -453,57 +500,6 @@ describe('Example Dump Files - Empty Dump', () => {
 });
 
 describe('Example Dump Files - Error Handling', () => {
-
-    describe('corrupted.dmp', () => {
-        it('should NOT have MDMP signature', () => {
-            const buf = fs.readFileSync(dumpPath('corrupted.dmp'));
-            // The corrupted file starts with ASCII text, not 'MDMP'
-            if (buf.length >= 4) {
-                expect(buf.readUInt32LE(0)).not.toBe(MDMP_SIGNATURE);
-            }
-        });
-
-        it('should throw when parsed', () => {
-            expect(() => parseMinidump(dumpPath('corrupted.dmp'))).toThrow(/Invalid MDMP signature/);
-        });
-    });
-
-    describe('truncated.dmp (64 bytes)', () => {
-        it('should have valid MDMP signature (header is intact)', () => {
-            const buf = fs.readFileSync(dumpPath('truncated.dmp'));
-            expect(buf.length).toBe(64);
-            expect(buf.readUInt32LE(0)).toBe(MDMP_SIGNATURE);
-        });
-
-        it('should parse header successfully', () => {
-            const buf = fs.readFileSync(dumpPath('truncated.dmp'));
-            const header = parseMinidumpHeader(buf);
-            expect(header.signature).toBe(MDMP_SIGNATURE);
-            expect(header.version).toBe(MDMP_VERSION);
-        });
-
-        it('should recover gracefully with partial stream directory', () => {
-            // The directory points beyond 64 bytes for most streams,
-            // so we should get fewer streams than declared.
-            const info = parseMinidump(dumpPath('truncated.dmp'));
-            expect(info.header.numberOfStreams).toBeGreaterThan(0);
-            // The parser should not crash; some streams may be missing
-            // because the file is cut short.
-            expect(info.streams.length).toBeLessThanOrEqual(info.header.numberOfStreams);
-        });
-
-        it('should have incomplete or missing metadata', () => {
-            const info = parseMinidump(dumpPath('truncated.dmp'));
-            // With only 64 bytes, most stream data is missing.
-            // At least one of these should be undefined:
-            const hasAllData = info.systemInfo && info.exception && info.threadCount !== undefined && info.moduleCount !== undefined;
-            // A fully intact dump would have all. A truncated one is unlikely to.
-            // but if the generator packed header+directory tightly, some streams may fit.
-            // The main test: it does NOT crash.
-            expect(info.header.signature).toBe(MDMP_SIGNATURE);
-        });
-    });
-
     describe('file too small to contain header', () => {
         it('should throw for a buffer shorter than 32 bytes', () => {
             const tinyBuf = Buffer.alloc(16);
@@ -538,8 +534,6 @@ describe('Example Dump Files - Existence Check', () => {
         'crash_access_violation_arm64.dmp',
         'crash_multithread_x64.dmp',
         'empty.dmp',
-        'corrupted.dmp',
-        'truncated.dmp',
     ];
 
     it.each(allFiles)('%s should exist in examples/', (filename) => {

@@ -32,8 +32,8 @@
 #elif defined(__aarch64__) || defined(_M_ARM64)
     #define MDMP_ARCH_ARM64
     static constexpr uint16_t MDMP_PROCESSOR_ARCH   = 12;
-    static constexpr uint32_t MDMP_CONTEXT_SIZE      = 800;  // MDRawContextARM64_Old
-    static constexpr uint32_t MDMP_CONTEXT_FLAGS_VAL = 0x00400007u; // ARM64_OLD FULL
+    static constexpr uint32_t MDMP_CONTEXT_SIZE      = 912;  // MDRawContextARM64
+    static constexpr uint32_t MDMP_CONTEXT_FLAGS_VAL = 0x00400007u; // ARM64 FULL
 #elif defined(__i386__) || defined(_M_IX86)
     #define MDMP_ARCH_X86
     static constexpr uint16_t MDMP_PROCESSOR_ARCH   = 0;
@@ -116,7 +116,7 @@ namespace ctx_off {
 }
 #elif defined(MDMP_ARCH_ARM64)
 namespace ctx_off {
-    // MDRawContextARM64_Old layout
+    // MDRawContextARM64 layout: context_flags + x0..x32 (PC).
     static constexpr size_t FLAGS = 0;          // uint64_t context_flags
     static constexpr size_t X0    = 8;          // iregs[0..31]  (x0-x30, sp)
     static constexpr size_t FP    = 8 + 29*8;   // x29

@@ -1,9 +1,81 @@
 // vscode is mocked globally via jest.config.js moduleNameMapper
-import { cleanStackwalkOutput, buildSymbolMatchReport } from '../src/analysis/stackwalk';
+import {
+  assessStackwalkResult,
+  buildSymbolMatchReport,
+  cleanStackwalkOutput,
+  countStackwalkFrames,
+  getSevereStackwalkDiagnostics,
+  parseCrashSummary,
+} from '../src/analysis/stackwalk';
 import { parseMachineFormat } from '../src/analysis/machine-format';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+describe('stackwalk result assessment', () => {
+  const frameOutput = `Operating system: Windows
+Thread 0 (crashed)
+ 0  app.exe + 0x1000`;
+
+  it('recognizes structural stderr as severe even when the process exits successfully', () => {
+    const stderr = [
+      'ReadString found odd-sized string',
+      'MinidumpModuleList size mismatch, 690 != 544',
+      'MinidumpSystemInfo could not read CSD version',
+      'Thread context is invalid',
+      'No stackwalker for sample.dmp',
+    ].join('\n');
+
+    const assessment = assessStackwalkResult(
+      'Operating system: Windows\nThread 0 (crashed)\n <no frames>',
+      stderr,
+    );
+
+    expect(assessment.status).toBe('invalid');
+    expect(assessment.frameCount).toBe(0);
+    expect(assessment.severeDiagnostics).toHaveLength(5);
+  });
+
+  it('marks output with usable frames as partial instead of complete', () => {
+    const assessment = assessStackwalkResult(frameOutput, 'No stackwalker for one thread');
+
+    expect(assessment.status).toBe('partial');
+    expect(assessment.frameCount).toBe(1);
+  });
+
+  it('does not classify ordinary missing-symbol warnings as structural failure', () => {
+    const stderr = "Can't construct symbol file path without debug_file (code_file = app.exe)";
+
+    expect(getSevereStackwalkDiagnostics(stderr)).toEqual([]);
+    expect(assessStackwalkResult(frameOutput, stderr).status).toBe('complete');
+  });
+
+  it('counts only numbered lines inside a Thread block as frames', () => {
+    const output = `Loaded modules:
+0x400000 - 0x410000 app.exe
+Thread 0 (crashed)
+ 0  app.exe + 0x1000
+ 1  ntdll.dll + 0x2000`;
+
+    expect(countStackwalkFrames(output)).toBe(2);
+  });
+
+  it('does not count CPU detail lines as stack frames in the crash summary', () => {
+    const output = `Operating system: Windows
+CPU: amd64
+     family 6 model 94 stepping 3
+     8 CPUs
+Thread 0 (crashed)
+ 0  app.exe + 0x1000
+ 1  app.exe + 0x2000
+Thread 1
+ 0  ntdll.dll + 0x1000`;
+
+    const summary = parseCrashSummary(output);
+
+    expect(summary.totalFrameCount).toBe(3);
+  });
+});
 
 describe('cleanStackwalkOutput', () => {
 

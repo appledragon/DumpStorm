@@ -99,7 +99,7 @@ class LlvmNmInstaller extends BaseInstaller {
 /**
  * Install llvm-nm tool automatically
  */
-export async function installLlvmNm(): Promise<void> {
+export async function installLlvmNm(): Promise<boolean> {
     const installer = new LlvmNmInstaller();
-    await installer.install();
+    return installer.install();
 }

@@ -63,9 +63,15 @@ Hover over register names (e.g., `eax`, `rsp`, `pc`) in analysis results to view
     "minidump-parser.symbolPath": "/path/to/your/symbols",
     "minidump-parser.customMinidumpStackwalkPath": "/custom/path/to/minidump_stackwalk",
     "minidump-parser.customNmPath": "/custom/path/to/nm",
+    "minidump-parser.customLlvmNmPath": "/custom/path/to/llvm-nm",
+    "minidump-parser.customDumpSymsPath": "/custom/path/to/dump_syms",
+    "minidump-parser.customLlvmUndnamePath": "/custom/path/to/llvm-undname",
     "minidump-parser.language": "en"
 }
 ```
+
+All custom executable paths can also be selected from the activity-bar panel.
+Use **Reset Custom Tool Paths** to clear them and return to automatic discovery.
 
 ## 📋 Requirements
 

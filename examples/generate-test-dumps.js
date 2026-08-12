@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 /**
- * Generate test minidump (.dmp) files for DumpStorm extension testing.
+ * Generate small synthetic minidump fixtures for DumpStorm testing.
+ *
+ * These files contain a valid stream layout, register context, and synthetic
+ * stack memory so minidump_stackwalk can walk them. They are not captures of
+ * a real process and do not contain code bytes or matching debug symbols.
  * 
  * Minidump format reference:
  * https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ns-minidumpapiset-minidump_header
@@ -137,7 +141,9 @@ class BinaryWriter {
 
 // ─── Minidump builder ────────────────────────────────────────────────────────
 
-function buildMinidump(options) {
+// Historical implementation kept below for format archaeology only. It is
+// intentionally not called; buildMinidump() is the validated implementation.
+function buildLegacyMinidump(options) {
     const {
         arch = PROCESSOR_ARCH.AMD64,
         platformId = PLATFORM_ID.WIN32_NT,
@@ -378,6 +384,296 @@ function buildMinidump(options) {
     return writer.getBuffer();
 }
 
+/*
+ * The old builder above is retained only as historical context for the
+ * original fixture format. The builder below is the one used by the script.
+ * It writes the referenced data (contexts, stacks, CSD, and module names)
+ * separately from the stream payloads, as required by the minidump format.
+ */
+const CONTEXT_LAYOUT = {
+    [PROCESSOR_ARCH.INTEL]: {
+        size: 716,
+        flags: 0x0001003F,
+        flagsSize: 4,
+        instructionPointer: 184,
+        stackPointer: 196,
+        framePointer: 180,
+        wordSize: 4,
+    },
+    [PROCESSOR_ARCH.AMD64]: {
+        size: 1232,
+        flags: 0x0010000B,
+        flagsSize: 4,
+        instructionPointer: 0xF8,
+        stackPointer: 0x98,
+        framePointer: 0xA0,
+        wordSize: 8,
+    },
+    [PROCESSOR_ARCH.ARM64]: {
+        size: 912,
+        flags: 0x00400007,
+        flagsSize: 8,
+        instructionPointer: 264,
+        stackPointer: 256,
+        framePointer: 240,
+        wordSize: 8,
+    },
+};
+const STACK_CAPTURE_SIZE = 0x1000;
+
+function asBigInt(value, fallback = 0n) {
+    if (value === undefined || value === null) {
+        return fallback;
+    }
+    return typeof value === 'bigint' ? value : BigInt(value);
+}
+
+function writeContextValue(buffer, offset, value, wordSize) {
+    const mask = wordSize === 4 ? 0xFFFFFFFFn : 0xFFFFFFFFFFFFFFFFn;
+    const normalized = asBigInt(value) & mask;
+    if (wordSize === 4) {
+        buffer.writeUInt32LE(Number(normalized), offset);
+    } else {
+        buffer.writeBigUInt64LE(normalized, offset);
+    }
+}
+
+function createThreadMemory(arch, ip, stackBase, returnAddresses, registers = {}) {
+    const layout = CONTEXT_LAYOUT[arch];
+    if (!layout) {
+        throw new Error(`Unsupported synthetic context architecture: ${arch}`);
+    }
+
+    const context = Buffer.alloc(layout.size);
+    writeContextValue(context, arch === PROCESSOR_ARCH.AMD64 ? 0x30 : 0, layout.flags, layout.flagsSize);
+
+    const stackPointer = stackBase + 0x20n;
+    const framePointer = stackBase + 0x100n;
+    const configuredIp = registers.ip ?? registers.rip ?? registers.eip ?? registers.pc ?? ip;
+    const configuredSp = registers.sp ?? registers.rsp ?? registers.esp ?? stackPointer;
+    const configuredFp = registers.fp ?? registers.rbp ?? registers.ebp ?? framePointer;
+    writeContextValue(context, layout.instructionPointer, configuredIp, layout.wordSize);
+    writeContextValue(context, layout.stackPointer, configuredSp, layout.wordSize);
+    writeContextValue(context, layout.framePointer, configuredFp, layout.wordSize);
+
+    if (arch === PROCESSOR_ARCH.ARM64) {
+        // MDRawContextARM64 stores x30/LR immediately before SP.
+        writeContextValue(context, 248, returnAddresses[0] ?? 0n, 8);
+    }
+
+    const stack = Buffer.alloc(STACK_CAPTURE_SIZE);
+    if (layout.wordSize === 4) {
+        stack.writeUInt32LE(Number(asBigInt(returnAddresses[0]) & 0xFFFFFFFFn), 0x24);
+        stack.writeUInt32LE(0, 0x100);
+        stack.writeUInt32LE(Number(asBigInt(returnAddresses[1]) & 0xFFFFFFFFn), 0x104);
+    } else {
+        stack.writeBigUInt64LE(asBigInt(returnAddresses[0]), 0x28);
+        stack.writeBigUInt64LE(0n, 0x100);
+        stack.writeBigUInt64LE(asBigInt(returnAddresses[1]), 0x108);
+    }
+
+    return { context, stack };
+}
+
+function buildMinidump(options) {
+    const {
+        arch = PROCESSOR_ARCH.AMD64,
+        platformId = PLATFORM_ID.WIN32_NT,
+        osMajor = 10,
+        osMinor = 0,
+        osBuild = 19041,
+        exceptionCode = EXCEPTION_CODE.ACCESS_VIOLATION,
+        exceptionAddress = 0x00007FF6A1B23456,
+        crashThreadId = 0x1234,
+        numberOfThreads = 3,
+        modules,
+        registers = {},
+        includeException = true,
+    } = options;
+    const layout = CONTEXT_LAYOUT[arch];
+    if (!layout) {
+        throw new Error(`Unsupported synthetic architecture: ${arch}`);
+    }
+
+    const defaultModules = [
+        { name: 'app.exe',       baseAddr: 0x00007FF6A1B00000, size: 0x100000 },
+        { name: 'ntdll.dll',     baseAddr: 0x00007FFA12340000, size: 0x1F0000 },
+        { name: 'kernel32.dll',  baseAddr: 0x00007FFA10000000, size: 0x0B0000 },
+        { name: 'ucrtbase.dll',  baseAddr: 0x00007FFA0E000000, size: 0x0F0000 },
+    ];
+    // An explicit [] is meaningful for the empty boundary fixture.
+    const dumpModules = modules === undefined ? defaultModules : modules;
+    const streamCount = 3 + (includeException ? 1 : 0);
+    const directoryOffset = 32;
+    const dataStartOffset = directoryOffset + streamCount * 12;
+    const writer = new BinaryWriter(Math.max(8192, dataStartOffset + 4096));
+    const streams = [];
+
+    writer.seek(dataStartOffset);
+
+    // ── 1. SystemInfoStream and an empty CSD string ──────────────────────
+    const systemInfoOffset = writer.tell();
+    const csdOffset = systemInfoOffset + 56;
+    writer.writeUInt16LE(arch);
+    writer.writeUInt16LE(6);
+    writer.writeUInt16LE(0x5E03);
+    writer.writeUInt8(8);
+    writer.writeUInt8(1);
+    writer.writeUInt32LE(osMajor);
+    writer.writeUInt32LE(osMinor);
+    writer.writeUInt32LE(osBuild);
+    writer.writeUInt32LE(platformId);
+    writer.writeUInt32LE(csdOffset);
+    writer.writeUInt16LE(0);
+    writer.writeUInt16LE(0);
+    for (let i = 0; i < 24; i++) writer.writeUInt8(0);
+    writer.writeUInt32LE(0); // Empty MINIDUMP_STRING.
+    streams.push({ streamType: STREAM_TYPE.SystemInfoStream, dataSize: 56, rva: systemInfoOffset });
+
+    // ── 2. Context and stack data referenced by each thread ──────────────
+    const threadMemory = [];
+    for (let i = 0; i < numberOfThreads; i++) {
+        const threadId = crashThreadId + i;
+        const stackBase = arch === PROCESSOR_ARCH.INTEL
+            ? 0x0012F000n + BigInt(i) * 0x10000n
+            : 0x00000050F0000000n + BigInt(i) * 0x100000n;
+        const module = dumpModules.length > 0 ? dumpModules[i % dumpModules.length] : undefined;
+        const moduleBase = module ? asBigInt(module.baseAddr) : 0n;
+        const ip = i === 0 && includeException
+            ? asBigInt(exceptionAddress)
+            : moduleBase + 0x1000n + BigInt(i * 0x10);
+        const returnAddresses = [
+            moduleBase + 0x2000n + BigInt(i * 0x10),
+            moduleBase + 0x3000n + BigInt(i * 0x10),
+        ];
+
+        writer.pad(4);
+        const contextRva = writer.tell();
+        const memory = createThreadMemory(
+            arch,
+            ip,
+            stackBase,
+            returnAddresses,
+            i === 0 ? registers : {},
+        );
+        writer.writeBytes(memory.context);
+        writer.pad(4);
+        const stackRva = writer.tell();
+        writer.writeBytes(memory.stack);
+        threadMemory.push({
+            threadId,
+            contextRva,
+            contextSize: layout.size,
+            stackBase,
+            stackRva,
+            stackSize: memory.stack.length,
+        });
+    }
+
+    // ── 3. ThreadListStream ──────────────────────────────────────────────
+    writer.pad(4);
+    const threadListOffset = writer.tell();
+    writer.writeUInt32LE(numberOfThreads);
+    for (const thread of threadMemory) {
+        writer.writeUInt32LE(thread.threadId);
+        writer.writeUInt32LE(0);
+        writer.writeUInt32LE(0);
+        writer.writeUInt32LE(0);
+        writer.writeUInt64LE(0);
+        writer.writeUInt64LE(thread.stackBase);
+        writer.writeUInt32LE(thread.stackSize);
+        writer.writeUInt32LE(thread.stackRva);
+        writer.writeUInt32LE(thread.contextSize);
+        writer.writeUInt32LE(thread.contextRva);
+    }
+    streams.push({
+        streamType: STREAM_TYPE.ThreadListStream,
+        dataSize: 4 + numberOfThreads * 48,
+        rva: threadListOffset,
+    });
+
+    // ── 4. ExceptionStream ───────────────────────────────────────────────
+    if (includeException) {
+        writer.pad(4);
+        const exceptionOffset = writer.tell();
+        const crashThread = threadMemory[0];
+        writer.writeUInt32LE(crashThreadId);
+        writer.writeUInt32LE(0);
+        writer.writeUInt32LE(exceptionCode);
+        writer.writeUInt32LE(0);
+        writer.writeUInt64LE(0);
+        writer.writeUInt64LE(asBigInt(exceptionAddress));
+        const numParams = exceptionCode === EXCEPTION_CODE.ACCESS_VIOLATION ? 2 : 0;
+        writer.writeUInt32LE(numParams);
+        writer.writeUInt32LE(0);
+        for (let i = 0; i < 15; i++) writer.writeUInt64LE(0);
+        writer.writeUInt32LE(crashThread.contextSize);
+        writer.writeUInt32LE(crashThread.contextRva);
+        streams.push({ streamType: STREAM_TYPE.ExceptionStream, dataSize: 168, rva: exceptionOffset });
+    }
+
+    // ── 5. ModuleListStream and referenced module-name strings ────────────
+    writer.pad(4);
+    const moduleListOffset = writer.tell();
+    writer.writeUInt32LE(dumpModules.length);
+    const moduleEntryOffsets = [];
+    for (const mod of dumpModules) {
+        moduleEntryOffsets.push(writer.tell());
+        writer.writeUInt64LE(asBigInt(mod.baseAddr));
+        writer.writeUInt32LE(mod.size);
+        writer.writeUInt32LE(0);
+        writer.writeUInt32LE(Math.floor(Date.now() / 1000));
+        writer.writeUInt32LE(0); // ModuleNameRva, patched below.
+        writer.writeUInt32LE(0xFEEF04BD);
+        for (let i = 0; i < 12; i++) writer.writeUInt32LE(0);
+        for (let i = 0; i < 4; i++) writer.writeUInt32LE(0);
+        writer.writeUInt64LE(0);
+        writer.writeUInt64LE(0);
+    }
+    const moduleListSize = 4 + dumpModules.length * 108;
+    const moduleNameOffsets = [];
+    for (const mod of dumpModules) {
+        writer.pad(4);
+        const nameRva = writer.tell();
+        moduleNameOffsets.push(nameRva);
+        const nameUtf16 = Buffer.from(mod.name, 'utf16le');
+        writer.writeUInt32LE(nameUtf16.length);
+        writer.writeBytes(nameUtf16);
+    }
+    const afterNames = writer.tell();
+    for (let i = 0; i < moduleEntryOffsets.length; i++) {
+        writer.seek(moduleEntryOffsets[i] + 20);
+        writer.writeUInt32LE(moduleNameOffsets[i]);
+    }
+    writer.seek(afterNames);
+    streams.push({
+        streamType: STREAM_TYPE.ModuleListStream,
+        // Name strings are referenced data, not part of MINIDUMP_MODULE_LIST.
+        dataSize: moduleListSize,
+        rva: moduleListOffset,
+    });
+
+    // ── Write header and stream directory ─────────────────────────────────
+    const totalSize = writer.tell();
+    writer.seek(0);
+    writer.writeUInt32LE(MDMP_SIGNATURE);
+    writer.writeUInt16LE(MDMP_VERSION);
+    writer.writeUInt16LE(IMPLEMENTATION_VERSION);
+    writer.writeUInt32LE(streams.length);
+    writer.writeUInt32LE(directoryOffset);
+    writer.writeUInt32LE(0);
+    writer.writeUInt32LE(Math.floor(Date.now() / 1000));
+    writer.writeUInt64LE(0); // MiniDumpNormal; no full-memory claim.
+    writer.seek(directoryOffset);
+    for (const stream of streams) {
+        writer.writeUInt32LE(stream.streamType);
+        writer.writeUInt32LE(stream.dataSize);
+        writer.writeUInt32LE(stream.rva);
+    }
+    writer.seek(totalSize);
+    return writer.getBuffer();
+}
+
 // ─── Generate test dump files ────────────────────────────────────────────────
 
 function generateAllTestDumps() {
@@ -541,6 +837,14 @@ function generateAllTestDumps() {
 
     console.log('Generating test minidump files...\n');
 
+    for (const legacyFixture of ['corrupted.dmp', 'truncated.dmp']) {
+        const legacyPath = path.join(outputDir, legacyFixture);
+        if (fs.existsSync(legacyPath)) {
+            fs.unlinkSync(legacyPath);
+            console.log(`  - removed obsolete fixture ${legacyFixture}`);
+        }
+    }
+
     for (const config of dumpConfigs) {
         const filePath = path.join(outputDir, config.filename);
         try {
@@ -552,22 +856,6 @@ function generateAllTestDumps() {
             console.error(`  ✗ ${config.filename} - ERROR: ${err.message}`);
         }
     }
-
-    // Also generate a corrupted file for negative testing
-    const corruptedPath = path.join(outputDir, 'corrupted.dmp');
-    const corruptedData = Buffer.from('This is not a valid minidump file. Random garbage data for testing error handling.\x00\xFF\xFE\xFD');
-    fs.writeFileSync(corruptedPath, corruptedData);
-    console.log(`  ✓ corrupted.dmp (${corruptedData.length} bytes) - Corrupted/invalid file for error handling tests`);
-
-    // Generate a truncated dump (valid header but truncated content)
-    const truncatedPath = path.join(outputDir, 'truncated.dmp');
-    const fullDump = buildMinidump({
-        arch: PROCESSOR_ARCH.AMD64,
-        exceptionCode: EXCEPTION_CODE.ACCESS_VIOLATION,
-    });
-    // Keep only first 64 bytes (header + partial directory)
-    fs.writeFileSync(truncatedPath, fullDump.slice(0, 64));
-    console.log(`  ✓ truncated.dmp (64 bytes) - Truncated dump file for robustness testing`);
 
     console.log('\nDone! Generated files in:', outputDir);
 }

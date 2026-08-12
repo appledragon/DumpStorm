@@ -1,4 +1,5 @@
 import {
+  enhanceStackTraceWithSymbols,
   parseModuleBaseAddresses,
   findNearestSymbol,
   loadSymbolTable,
@@ -6,6 +7,9 @@ import {
   getCacheStats,
   testHelpers,
 } from '../src/symbols/enhancer';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // vscode is mocked globally via jest.config.js moduleNameMapper
 
@@ -167,6 +171,25 @@ nm command output:
       const table = loadSymbolTable('/nonexistent/path.txt');
       expect(table.size).toBe(0);
     });
+  });
+
+  it('recognizes collision-safe batch symbol filenames by module name', async () => {
+    const symbolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dumpstorm-enhancer-'));
+    const symbolFile = path.join(symbolDir, 'foo_0123456789ab_nm.txt');
+    fs.writeFileSync(symbolFile, [
+      '=== SYMBOLS FOR foo ===',
+      '0000000000000010 T fooFunction',
+    ].join('\n'));
+
+    try {
+      const enhanced = await enhanceStackTraceWithSymbols(
+        'Thread 0 (crashed)\n 0 foo.dll + 0x10',
+        symbolDir,
+      );
+      expect(enhanced).toContain('fooFunction');
+    } finally {
+      fs.rmSync(symbolDir, { recursive: true, force: true });
+    }
   });
 
   describe('findNearestSymbol', () => {

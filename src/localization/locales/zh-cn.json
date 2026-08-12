@@ -310,6 +310,8 @@
     "chooseLanguage": "选择语言",
     "english": "English",
     "chineseSimplified": "简体中文",
+    "nativeEnglishName": "English",
+    "nativeChineseName": "简体中文",
     "clickToSwitch": "(点击切换)",
     "singleFile": "单文件",
     "singleFileDesc": "从单个二进制文件提取符号",
@@ -350,8 +352,11 @@
     "customMinidumpPathSet": "自定义 minidump_stackwalk 路径已设置为：{0}",
     "invalidMinidumpExecutable": "选定的文件不是有效的 minidump_stackwalk 可执行文件",
     "selectNmExecutable": "选择 nm/llvm-nm 可执行文件",
+    "selectLlvmNmExecutable": "选择 llvm-nm 可执行文件",
     "customNmPathSet": "自定义 nm/llvm-nm 路径已设置为：{0}",
+    "customLlvmNmPathSet": "自定义 llvm-nm 路径已设置为：{0}",
     "invalidNmExecutable": "选定的文件不是有效的 nm 或 llvm-nm 可执行文件",
+    "invalidLlvmNmExecutable": "选定的文件不是有效的 llvm-nm 可执行文件",
     "resetCustomPathsConfirm": "这将重置所有自定义工具路径为默认值。确认继续？",
     "customPathsReset": "所有自定义工具路径已重置为默认值",
     "errorSwitchingDumpFile": "切换到DUMP文件时出错：{0}",
@@ -403,7 +408,89 @@
     "installingStackwalkAlternative": "正在安装 minidump_stackwalk（替代方法）...",
     "stackwalkInstallationSuccess": "✅ 正在使用推荐的可靠下载方式...",
     "clickToOpenInstallFolder": "点击打开安装目录",
-    "systemPath": "通过系统 PATH 可用"
+    "systemPath": "通过系统 PATH 可用",
+    "notConfigured": "未配置",
+    "customDumpSymsPath": "自定义 dump_syms",
+    "customLlvmUndnamePath": "自定义 llvm-undname",
+    "setCustomDumpSymsPath": "设置自定义 dump_syms 路径",
+    "setCustomLlvmUndnamePath": "设置自定义 llvm-undname 路径",
+    "selectDumpSymsExecutable": "选择 dump_syms 可执行文件",
+    "selectLlvmUndnameExecutable": "选择 llvm-undname 可执行文件",
+    "customDumpSymsPathSet": "自定义 dump_syms 路径已设置为：{0}",
+    "customLlvmUndnamePathSet": "自定义 llvm-undname 路径已设置为：{0}",
+    "invalidDumpSymsExecutable": "选定的文件不是有效的 dump_syms 可执行文件",
+    "invalidLlvmUndnameExecutable": "选定的文件不是有效的 llvm-undname 可执行文件",
+    "resetCustomPaths": "重置自定义工具路径",
+    "extractingSymbolsWithNm": "正在使用 nm 提取符号...",
+    "runningNmCommand": "正在运行 {0} 命令...",
+    "processingSymbolData": "正在处理符号数据...",
+    "symbolExtractionCompleted": "符号提取完成！",
+    "batchExtractingSymbols": "正在批量提取符号...",
+    "dumpSymsUnavailable": "未找到 dump_syms。请安装 Breakpad 的 dump_syms 并确保它在 PATH 中，或设置 \"minidump-parser.customDumpSymsPath\"。",
+    "singleBreakpadBinary": "单个二进制文件",
+    "singleBreakpadBinaryDetail": "选择一个 .exe / .dll / .so / .dylib 文件",
+    "directoryBreakpad": "目录（递归）",
+    "directoryBreakpadDetail": "对目录下的所有二进制文件运行 dump_syms",
+    "breakpadExtraction": "Breakpad 符号提取",
+    "chooseBreakpadExtractionMode": "选择提取模式",
+    "selectBreakpadBinary": "选择用于 dump_syms 的二进制文件",
+    "selectBreakpadDirectory": "选择要使用 dump_syms 扫描的目录",
+    "breakpadExtractionSummary": "dump_syms：成功 {0} 个，失败 {1} 个。",
+    "breakpadExtractionFailed": "dump_syms 失败：{0}",
+    "selectSymbolDirectory": "选择符号目录",
+    "currentLanguage": "✓ 当前语言",
+    "languageTooltip": "当前工具提示使用的语言",
+    "switchToLanguage": "切换到 {0}",
+    "selectLanguage": "Select Language / 选择语言",
+    "dumpFilesFilter": "DUMP 文件",
+    "allFilesFilter": "所有文件",
+    "executableFilesFilter": "可执行文件",
+    "breakpadSymbolExtracted": "已提取 .sym：{0}（{1}…）",
+    "breakpadBinaryNotFound": "未找到二进制文件：{0}",
+    "dumpSymsNoModuleHeader": "dump_syms 未为 {0} 生成 MODULE 头；二进制文件可能已剥离或不受支持。",
+    "dumpSymsNotFound": "未找到 dump_syms。请安装 Breakpad 的 dump_syms 并确保它在 PATH 中，或设置 \"minidump-parser.customDumpSymsPath\"。",
+    "dumpSymsFailedForFile": "dump_syms 处理 {0} 失败：{1}",
+    "closeDumpFileError": "关闭 DUMP 文件时出错：{0}",
+    "manualLlvmNmGuideOpened": "LLVM-NM 手动安装指南已打开",
+    "analyzingDumpFile": "正在分析 DUMP 文件...",
+    "preparingAnalysis": "正在准备分析...",
+    "processingAnalysisResults": "正在处理分析结果...",
+    "analysisComplete": "分析完成！",
+    "analysisPartial": "部分分析",
+    "analysisInvalid": "分析无效",
+    "dumpFileAnalysisPartial": "DUMP 文件分析不完整：{0}。stackwalk 工具报告了严重诊断错误。",
+    "dumpFileAnalysisInvalid": "DUMP 文件分析无效：{0}。未生成可用的堆栈帧。",
+    "partialAnalysisResult": "stackwalk 报告了严重诊断错误；此结果只能作为部分分析使用。",
+    "invalidAnalysisResult": "未生成可用的堆栈帧；无法可靠分析此 DUMP 文件。"
+    ,"downloadingTool": "正在下载 {0} 二进制文件..."
+    ,"extractingTool": "正在提取 {0} 二进制文件..."
+    ,"installingTool": "正在将 {0} 安装到 .dumpstorm/bin 目录..."
+    ,"toolInstallationCompleted": "{0} 安装成功完成！"
+    ,"nmUnavailable": "未找到 nm 命令。macOS 请安装 Xcode Command Line Tools，Linux 请安装 build-essential。"
+    ,"nmCommandNotFound": "未找到 {0} 命令。请确保已安装开发工具。"
+    ,"nmCommandFailed": "{0} 命令执行失败：{1}"
+    ,"noSymbolsFound": "在 {0} 中未找到符号。二进制文件可能已剥离或不包含符号信息。"
+    ,"analysisCancelled": "DUMP 分析已取消。"
+    ,"analysisTimedOut": "DUMP 分析在 {0} 毫秒后超时。"
+    ,"stackwalkToolNotFound": "未找到 minidump_stackwalk 工具。请安装 Breakpad 工具。"
+    ,"invalidDumpFile": "DUMP 文件格式无效或已损坏。"
+    ,"stackwalkPermissionDenied": "权限被拒绝。请检查 DUMP 文件或二进制文件的权限。"
+    ,"stackwalkExecutionFailed": "minidump_stackwalk 执行失败：{0}\n\n标准错误：{1}"
+    ,"noStackTraceData": "DUMP 文件中没有堆栈跟踪数据，文件可能为空或已损坏。"
+    ,"nmToolLabel": "nm/llvm-nm"
+    ,"stackwalkToolLabel": "minidump_stackwalk"
+    ,"customPathStatus": "✅ 自定义路径"
+    ,"aboutMessage": "Minidump Parser\n\n版本：{0}\n作者：AppleDragon\n\nGitHub：https://github.com/appledragon/DumpStorm"
+    ,"github": "GitHub"
+    ,"close": "关闭"
+    ,"userCancelledInstallation": "用户取消了安装。"
+    ,"failedToMakeBinaryExecutable": "设置二进制文件可执行失败：{0}"
+  },
+  "manualGuide": {
+    "stackwalkWindows": "# Windows 手动安装\n\n1. 下载工具包：\n   {0}\n\n2. 解压下载的 zip 文件。\n\n3. 创建 `%USERPROFILE%\\\\.dumpstorm\\\\bin`，并将 `minidump_stackwalk.exe` 复制到其中。\n\n4. 重启 VS Code 后重试。\n\nPowerShell：\n```powershell\nInvoke-WebRequest -Uri \"{0}\" -OutFile \"breakpad.zip\"\nExpand-Archive -Path \"breakpad.zip\" -DestinationPath \"breakpad-extract\"\nNew-Item -ItemType Directory -Force -Path \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\"\nCopy-Item \"breakpad-extract\\\\*\\\\minidump_stackwalk.exe\" \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\\\\\" -Force\n```",
+    "stackwalkUnix": "# {0} 手动安装\n\n1. 下载工具包：\n   {1}\n\n2. 解压后，将 `minidump_stackwalk` 复制到 `~/.dumpstorm/bin/`。\n\n3. 执行 `chmod +x ~/.dumpstorm/bin/minidump_stackwalk`。\n\n4. 重启 VS Code 后重试。",
+    "llvmNmWindows": "# Windows 手动安装 LLVM-NM\n\n1. 从 LLVM nightly 发布页下载并解压 `llvm-nm-windows-x64.zip`。\n2. 将 `llvm-nm.exe` 复制到 `%USERPROFILE%\\\\.dumpstorm\\\\bin\\\\`。\n3. 重启 VS Code。\n\nPowerShell：\n```powershell\n$url = \"https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-windows-x64.zip\"\n$zip = \"$env:TEMP\\\\llvm-nm.zip\"\nInvoke-WebRequest -Uri $url -OutFile $zip\nExpand-Archive -Path $zip -DestinationPath \"$env:TEMP\\\\llvm-nm\" -Force\nCopy-Item \"$env:TEMP\\\\llvm-nm\\\\*\\\\llvm-nm.exe\" \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\\\\\" -Force\n```",
+    "llvmNmUnix": "# {0} 手动安装 LLVM-NM\n\n1. 从 LLVM nightly 发布页下载 `llvm-nm-{1}.tar.gz`。\n2. 解压后，将 `llvm-nm` 复制到 `~/.dumpstorm/bin/`。\n3. 执行 `chmod +x ~/.dumpstorm/bin/llvm-nm`。\n4. 重启 VS Code。"
   },
   "values": {
     "nullPointer": "空指针",

@@ -2,7 +2,7 @@
   "name": "minidump-parser",
   "displayName": "Minidump Parser",
   "description": "Powerful crash dump analyzer for native applications. Analyze minidump files (.dmp), extract symbols, enhance stack traces, and analyze crashes with register tooltips and multilingual support.",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "publisher": "CuiLiAn",
   "repository": {
     "type": "git",
@@ -145,6 +145,16 @@
         "icon": "$(folder-opened)"
       },
       {
+        "command": "minidump-parser.setCustomDumpSymsPath",
+        "title": "Set Custom dump_syms Path",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "minidump-parser.setCustomLlvmUndnamePath",
+        "title": "Set Custom llvm-undname Path",
+        "icon": "$(folder-opened)"
+      },
+      {
         "command": "minidump-parser.resetCustomPaths",
         "title": "Reset Custom Tool Paths",
         "icon": "$(refresh)"
@@ -245,12 +255,14 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run validate && npm run compile && npm run validate:package",
+    "validate": "node scripts/validate-extension.js",
+    "validate:package": "node scripts/validate-extension.js --built",
     "compile": "tsc -p ./ && npm run copy-locales",
     "copy-locales": "node -e \"const fs = require('fs'); const path = require('path'); const srcDir = 'src/localization/locales'; const outDir = 'out/localization/locales'; if (!fs.existsSync(outDir)) { fs.mkdirSync(outDir, { recursive: true }); } fs.readdirSync(srcDir).forEach(file => { if (file.endsWith('.json')) { fs.copyFileSync(path.join(srcDir, file), path.join(outDir, file)); } });\"",
     "watch": "tsc -watch -p ./ & npm run watch-locales",
     "watch-locales": "node -e \"const fs = require('fs'); const path = require('path'); const srcDir = 'src/localization/locales'; const outDir = 'out/localization/locales'; if (!fs.existsSync(outDir)) { fs.mkdirSync(outDir, { recursive: true }); } fs.readdirSync(srcDir).forEach(file => { if (file.endsWith('.json')) { fs.copyFileSync(path.join(srcDir, file), path.join(outDir, file)); } });\"",
-    "package": "vsce package",
+    "package": "npm run validate && vsce package",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"

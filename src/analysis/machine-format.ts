@@ -80,23 +80,58 @@ function emptyDump(): MachineDump {
     };
 }
 
-/** Parse a hex or decimal numeric field; returns NaN on failure. */
-function parseNumber(value: string): number {
-    if (!value) {
+const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
+/** Parse a decimal index/line field; returns NaN on failure. */
+function parseDecimal(value: string): number {
+    const trimmed = value.trim();
+    if (!/^[+-]?\d+$/.test(trimmed)) {
         return NaN;
     }
+
+    try {
+        const parsed = BigInt(trimmed);
+        if (parsed < BigInt(Number.MIN_SAFE_INTEGER) || parsed > MAX_SAFE_INTEGER_BIGINT) {
+            return NaN;
+        }
+        return Number(parsed);
+    } catch {
+        return NaN;
+    }
+}
+
+/**
+ * Parse an address/offset as hexadecimal and keep precision during parsing.
+ * Breakpad emits bare hexadecimal addresses, including values containing only
+ * decimal digits, so these fields must not use decimal inference.
+ */
+export function parseAddress(value: string): number {
     const trimmed = value.trim();
     if (trimmed === '') {
         return NaN;
     }
-    if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
-        return parseInt(trimmed, 16);
+
+    const digits = trimmed.startsWith('0x') || trimmed.startsWith('0X')
+        ? trimmed.slice(2)
+        : trimmed;
+    if (!/^[0-9a-fA-F]+$/.test(digits)) {
+        return NaN;
     }
-    // Bare hex (no prefix) — Breakpad emits both styles depending on field
-    if (/^[0-9a-fA-F]+$/.test(trimmed) && /[a-fA-F]/.test(trimmed)) {
-        return parseInt(trimmed, 16);
+
+    try {
+        const parsed = BigInt(`0x${digits}`);
+        if (parsed < 0n || parsed > MAX_SAFE_INTEGER_BIGINT) {
+            console.warn(`Skipping unsafe machine-format address: ${value}`);
+            return NaN;
+        }
+        return Number(parsed);
+    } catch {
+        return NaN;
     }
-    return parseInt(trimmed, 10);
+}
+
+function parseOptionalAddress(value: string): number {
+    return value.trim() === '' ? 0 : parseAddress(value);
 }
 
 /** Parse the output of `minidump_stackwalk -m`. */
@@ -140,7 +175,7 @@ export function parseMachineFormat(output: string): MachineDump {
                 // Crash|reason|address|crashing_thread
                 dump.crashReason = fields[1] ?? '';
                 dump.crashAddress = fields[2] ?? '';
-                const ct = parseNumber(fields[3] ?? '');
+                const ct = parseDecimal(fields[3] ?? '');
                 if (!Number.isNaN(ct)) {
                     dump.crashingThread = ct;
                 }
@@ -151,9 +186,10 @@ export function parseMachineFormat(output: string): MachineDump {
                 if (fields.length < 8) {
                     break;
                 }
-                const baseAddress = parseNumber(fields[5]);
-                const maxAddress = parseNumber(fields[6]);
-                if (Number.isNaN(baseAddress)) {
+                const baseAddress = parseAddress(fields[5]);
+                const maxAddress = parseOptionalAddress(fields[6]);
+                if (Number.isNaN(baseAddress) || Number.isNaN(maxAddress)) {
+                    console.warn(`Skipping module with invalid or unsafe address: ${fields[1] ?? ''}`);
                     break;
                 }
                 dump.modules.push({
@@ -162,7 +198,7 @@ export function parseMachineFormat(output: string): MachineDump {
                     debugFile: fields[3] ?? '',
                     debugId: (fields[4] ?? '').toUpperCase(),
                     baseAddress,
-                    maxAddress: Number.isNaN(maxAddress) ? 0 : maxAddress,
+                    maxAddress,
                     isMain: (fields[7] ?? '').trim() === '1',
                 });
                 break;
@@ -170,20 +206,26 @@ export function parseMachineFormat(output: string): MachineDump {
             default: {
                 // Frame line: <thread>|<frame>|<module>|<function>|<src_file>|<src_line>|<offset>
                 // First two fields must be numeric; otherwise this is not a frame.
-                const threadIdx = parseNumber(fields[0]);
-                const frameIdx = parseNumber(fields[1]);
+                const threadIdx = parseDecimal(fields[0]);
+                const frameIdx = parseDecimal(fields[1]);
                 if (Number.isNaN(threadIdx) || Number.isNaN(frameIdx) || fields.length < 3) {
                     continue;
                 }
-                const moduleOffset = fields.length >= 7 ? parseNumber(fields[6]) : NaN;
+                const moduleOffset = fields.length >= 7 && fields[6].trim() !== ''
+                    ? parseAddress(fields[6])
+                    : 0;
+                if (Number.isNaN(moduleOffset)) {
+                    console.warn(`Skipping frame with invalid or unsafe offset: ${fields[6] ?? ''}`);
+                    continue;
+                }
                 dump.frames.push({
                     threadIndex: threadIdx,
                     frameIndex: frameIdx,
                     module: fields[2] ?? '',
                     function: fields[3] ?? '',
                     sourceFile: fields[4] ?? '',
-                    sourceLine: parseNumber(fields[5] ?? '') || 0,
-                    moduleOffset: Number.isNaN(moduleOffset) ? 0 : moduleOffset,
+                    sourceLine: parseDecimal(fields[5] ?? '') || 0,
+                    moduleOffset,
                 });
                 break;
             }

@@ -221,8 +221,8 @@ describe('LLVM-NM Curl Installer', () => {
       // Run the installation
       await installLlvmNmWithCurl();
 
-      // Verify success message was shown (called 3 times: user confirmation, starting installation, final success)
-      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(3);
+      // Verify success message was shown (user confirmation and final success)
+      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(2);
       expect(mockVscode.window.showInformationMessage).toHaveBeenLastCalledWith(
         'llvm-nm installed successfully!',
         { modal: true },

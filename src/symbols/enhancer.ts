@@ -233,6 +233,25 @@ function getLibraryBaseName(libName: string): string {
     return path.basename(baseName);
 }
 
+function findSymbolTable<T>(tables: Map<string, T>, libName: string): T | undefined {
+    const baseName = getLibraryBaseName(libName);
+    const direct = tables.get(baseName) || tables.get(libName);
+    if (direct) {
+        return direct;
+    }
+
+    // Batch extraction appends a stable source-path hash to avoid collisions
+    // between same-named binaries. Treat that suffix as metadata for lookup.
+    const normalizedBase = baseName.toLowerCase();
+    for (const [tableName, table] of tables) {
+        const withoutCollisionSuffix = tableName.replace(/_[0-9a-f]{12}$/i, '');
+        if (getLibraryBaseName(withoutCollisionSuffix).toLowerCase() === normalizedBase) {
+            return table;
+        }
+    }
+    return undefined;
+}
+
 export function parseModuleBaseAddresses(stackTraceOutput: string): Map<string, number> {
     const moduleBaseAddresses = new Map<string, number>();
     const lines = stackTraceOutput.split('\n');
@@ -353,14 +372,14 @@ export async function enhanceStackTraceWithSymbols(
                 continue;
             }
 
-            const symbolTable = symbolTables.get(baseLibName) || symbolTables.get(libName);
+            const symbolTable = findSymbolTable(symbolTables, libName);
             
             if (symbolTable) {
                 log(`Looking up ${libName}+0x${offsetStr} (offset=${offset}) in symbol table with ${symbolTable.size} symbols`);
                 
                 // For offset notation, the address is already relative to the module base
                 // So we search directly with the offset value (no base address subtraction needed)
-                const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                const sorted = findSymbolTable(sortedTables, libName);
                 const symbolName = findNearestSymbolSorted(sorted || null, offset, undefined, true);
                 if (symbolName) {
                     enhancedLine += `  <-- ${symbolName}`;
@@ -382,12 +401,12 @@ export async function enhanceStackTraceWithSymbols(
                 
                 // Try to find the library in our symbol tables
                 const baseLibName = getLibraryBaseName(libName);
-                const symbolTable = symbolTables.get(baseLibName) || symbolTables.get(libName);
+                const symbolTable = findSymbolTable(symbolTables, libName);
                 
                 if (symbolTable) {
                     // Get the base address for this module
                     const baseAddress = moduleBaseAddresses.get(baseLibName) || moduleBaseAddresses.get(libName);
-                    const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                    const sorted = findSymbolTable(sortedTables, libName);
                     const symbolName = findNearestSymbolSorted(sorted || null, address, baseAddress, false);
                     if (symbolName) {
                         enhancedLine += `  <-- ${symbolName}`;
@@ -403,11 +422,11 @@ export async function enhanceStackTraceWithSymbols(
                 const address = parseInt(addressStr, 16);
                 
                 const baseLibName = getLibraryBaseName(libName);
-                const symbolTable = symbolTables.get(baseLibName) || symbolTables.get(libName);
+                const symbolTable = findSymbolTable(symbolTables, libName);
                 
                 if (symbolTable) {
                     const baseAddress = moduleBaseAddresses.get(baseLibName) || moduleBaseAddresses.get(libName);
-                    const sorted = sortedTables.get(baseLibName) || sortedTables.get(libName);
+                    const sorted = findSymbolTable(sortedTables, libName);
                     const symbolName = findNearestSymbolSorted(sorted || null, address, baseAddress, false);
                     if (symbolName) {
                         enhancedLine += `  <-- ${symbolName}`;

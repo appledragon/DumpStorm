@@ -99,7 +99,7 @@ class MinidumpStackwalkInstaller extends BaseInstaller {
 /**
  * Install minidump_stackwalk tool automatically
  */
-export async function installMinidumpStackwalk(): Promise<void> {
+export async function installMinidumpStackwalk(): Promise<boolean> {
     const installer = new MinidumpStackwalkInstaller();
-    await installer.install();
+    return installer.install();
 }

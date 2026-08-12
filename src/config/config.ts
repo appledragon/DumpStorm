@@ -222,6 +222,16 @@ export function getCustomNmPath(): string | undefined {
     return getCustomSettingPath('customNmPath');
 }
 
+// Helper function to get custom Breakpad dump_syms path from VS Code settings
+export function getCustomDumpSymsPath(): string | undefined {
+    return getCustomSettingPath('customDumpSymsPath');
+}
+
+// Helper function to get custom llvm-undname path from VS Code settings
+export function getCustomLlvmUndnamePath(): string | undefined {
+    return getCustomSettingPath('customLlvmUndnamePath');
+}
+
 // Helper function to check if a path points to a valid executable
 function isValidExecutablePath(customPath: string): boolean {
     try {
@@ -261,6 +271,16 @@ export function isValidLlvmNmPath(customPath: string): boolean {
 
 // Helper function to check if a custom nm path is valid
 export function isValidNmPath(customPath: string): boolean {
+    return isValidExecutablePath(customPath);
+}
+
+// Helper function to check a custom dump_syms executable
+export function isValidDumpSymsPath(customPath: string): boolean {
+    return isValidExecutablePath(customPath);
+}
+
+// Helper function to check a custom llvm-undname executable
+export function isValidLlvmUndnamePath(customPath: string): boolean {
     return isValidExecutablePath(customPath);
 }
 

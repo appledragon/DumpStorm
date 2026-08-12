@@ -2,12 +2,154 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { execFile, execSync } from 'child_process';
+import { ChildProcess, execFile, execSync } from 'child_process';
 import { MINIDUMP_STACKWALK_CONFIG, getCustomMinidumpStackwalkPath, getDownloadUrl, getBinaryName, getShowStackScanFrames, isValidMinidumpStackwalkPath } from '../config/config';
 import { installMinidumpStackwalk } from '../tools/minidump-stackwalk-installer';
 import { enhanceStackTraceWithSymbols } from '../symbols/enhancer';
 import { localization } from '../localization/localization';
 import { MachineDump, parseMachineFormat } from './machine-format';
+
+export const STACKWALK_EXEC_TIMEOUT_MS = 120_000;
+export const ANALYSIS_CANCELLED_CODE = 'ANALYSIS_CANCELLED';
+
+export function createAnalysisCancelledError(): Error & { code: string } {
+    const error = new Error(localization.getUI('analysisCancelled'));
+    error.name = ANALYSIS_CANCELLED_CODE;
+    (error as Error & { code: string }).code = ANALYSIS_CANCELLED_CODE;
+    return error as Error & { code: string };
+}
+
+export function isAnalysisCancelledError(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === 'object' &&
+        ((error as { code?: string }).code === ANALYSIS_CANCELLED_CODE ||
+            (error as { name?: string }).name === ANALYSIS_CANCELLED_CODE),
+    );
+}
+
+export const PARTIAL_ANALYSIS_MARKER = '=== PARTIAL ANALYSIS ===';
+export const INVALID_ANALYSIS_MARKER = '=== INVALID ANALYSIS ===';
+
+export type StackwalkResultStatus = 'complete' | 'partial' | 'invalid';
+
+export interface StackwalkResultAssessment {
+    status: StackwalkResultStatus;
+    frameCount: number;
+    severeDiagnostics: string[];
+}
+
+const SEVERE_STACKWALK_DIAGNOSTICS: readonly RegExp[] = [
+    /readstring\b.*odd[-\s]?sized/i,
+    /minidumpmodulelist\b.*(?:size\s+mismatch|index\s+out\s+of\s+range)/i,
+    /\b(?:thread|exception|context)\b.*\b(?:invalid|cannot\s+read|could\s+not\s+read|unavailable|missing)\b/i,
+    /\b(?:minidumpcontext|context)\b.*\bsize\s+mismatch\b/i,
+    /\bminidumpsysteminfo\b.*\b(?:could\s+not\s+read|cannot\s+read|invalid|missing)\b/i,
+    /\b(?:memory|stack)\s+(?:region|descriptor)\b.*\b(?:invalid|problem|out\s+of\s+range|missing)\b/i,
+    /\bno\s+memory\s+region\b/i,
+    /\bno\s+stackwalker\b/i,
+    /can't\s+choose\s+a\s+stackwalker.*context/i,
+    /\b(?:invalid|corrupt(?:ed)?|malformed|truncated)\s+(?:dump|minidump|stream|file)\b/i,
+];
+
+/**
+ * Return only diagnostics that indicate the dump could not be walked
+ * reliably. Symbol lookup warnings are intentionally not included: a dump
+ * without local symbols can still have a valid context frame.
+ */
+export function getSevereStackwalkDiagnostics(stderr: string): string[] {
+    const diagnostics: string[] = [];
+    for (const line of (stderr || '').split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || !SEVERE_STACKWALK_DIAGNOSTICS.some(pattern => pattern.test(trimmed))) {
+            continue;
+        }
+        if (!diagnostics.includes(trimmed)) {
+            diagnostics.push(trimmed);
+        }
+    }
+    return diagnostics;
+}
+
+/**
+ * Count actual frame lines in human-readable stackwalk output.
+ * Numbered lines outside a Thread block are not treated as stack frames.
+ */
+export function countStackwalkFrames(output: string): number {
+    let inThread = false;
+    let count = 0;
+    for (const line of (output || '').split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (/^Thread\s+\d+\b/i.test(trimmed)) {
+            inThread = true;
+            continue;
+        }
+        if (inThread && /^(?:\d+)\s+\S+/.test(trimmed)) {
+            count++;
+        }
+        if (inThread && /^(?:Loaded modules:|Crash reason:|Operating system:|GPU:)/i.test(trimmed)) {
+            inThread = false;
+        }
+    }
+    return count;
+}
+
+/**
+ * Assess the result independently of the process exit code. Breakpad can
+ * exit 0 after emitting a structurally broken dump, so stdout alone is not a
+ * success signal.
+ */
+export function assessStackwalkResult(
+    stdout: string,
+    stderr: string,
+    machineFrameCount = 0,
+    executionFailed = false,
+): StackwalkResultAssessment {
+    const severeDiagnostics = getSevereStackwalkDiagnostics(stderr);
+    const frameCount = Math.max(countStackwalkFrames(stdout), machineFrameCount);
+    let status: StackwalkResultStatus = 'complete';
+    if (frameCount === 0) {
+        status = 'invalid';
+    } else if (severeDiagnostics.length > 0 || executionFailed) {
+        status = 'partial';
+    }
+    return { status, frameCount, severeDiagnostics };
+}
+
+export function getStackwalkResultStatus(output: string): StackwalkResultStatus {
+    if (output.includes(INVALID_ANALYSIS_MARKER)) {
+        return 'invalid';
+    }
+    if (output.includes(PARTIAL_ANALYSIS_MARKER)) {
+        return 'partial';
+    }
+    return 'complete';
+}
+
+function addStackwalkStatus(
+    output: string,
+    assessment: StackwalkResultAssessment,
+    executionError?: Error | null,
+): string {
+    if (assessment.status === 'complete') {
+        return output;
+    }
+    const marker = assessment.status === 'invalid'
+        ? INVALID_ANALYSIS_MARKER
+        : PARTIAL_ANALYSIS_MARKER;
+    const descriptionKey = assessment.status === 'invalid'
+        ? 'invalidAnalysisResult'
+        : 'partialAnalysisResult';
+    const lines = [marker, localization.getUI(descriptionKey)];
+    if (executionError) {
+        lines.push(`Process error: ${executionError.message}`);
+    }
+    for (const diagnostic of assessment.severeDiagnostics) {
+        lines.push(`Stackwalk diagnostic: ${diagnostic}`);
+    }
+    lines.push('', output);
+    return lines.join('\n');
+}
 
 export async function getBinaryPath(context: vscode.ExtensionContext): Promise<string> {
     // First check if user has specified a custom minidump_stackwalk path
@@ -66,12 +208,28 @@ export async function getBinaryPath(context: vscode.ExtensionContext): Promise<s
         vscode.window.showInformationMessage(installInstructions);
         throw new Error(localization.getUI('userChoseManualInstallation'));
     } else {
-        throw new Error('User cancelled installation');
+        throw new Error(localization.getUI('userCancelledInstallation'));
     }
 }
 
-export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: string, symbolPath: string): Promise<string> {
+export async function runStackwalk(
+    context: vscode.ExtensionContext,
+    dumpPath: string,
+    symbolPath: string,
+    cancellationToken?: vscode.CancellationToken,
+): Promise<string> {
+    const token = cancellationToken ?? {
+        isCancellationRequested: false,
+        onCancellationRequested: () => ({ dispose: () => undefined }),
+    } as vscode.CancellationToken;
+    if (token.isCancellationRequested) {
+        return Promise.reject(createAnalysisCancelledError());
+    }
+
     const exe = await getBinaryPath(context);
+    if (token.isCancellationRequested) {
+        return Promise.reject(createAnalysisCancelledError());
+    }
     
     try {
         // Ensure binary is executable on Unix systems (skip for auto-installed dumpstorm binaries which are already set)
@@ -83,7 +241,7 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
             }
         }
     } catch (error) {
-        throw new Error(`Failed to make binary executable: ${error}`);
+        throw new Error(localization.format(localization.getUI('failedToMakeBinaryExecutable'), error));
     }
 
     // Log the exact command being executed for debugging
@@ -94,12 +252,87 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
     console.log(`  Command: ${exe} "${dumpPath}" "${symbolPath}"`);
 
     return new Promise<string>((resolve, reject) => {
+        let machineProcess: ChildProcess | undefined;
+        let humanProcess: ChildProcess | undefined;
+        let cancellationDisposable: vscode.Disposable | undefined;
+        let settled = false;
+        let timeoutHandle: NodeJS.Timeout | undefined;
+
+        const cleanup = () => {
+            cancellationDisposable?.dispose();
+            cancellationDisposable = undefined;
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+                timeoutHandle = undefined;
+            }
+        };
+
+        const terminate = (process: ChildProcess | undefined) => {
+            if (process && !process.killed) {
+                process.kill();
+            }
+        };
+
+        const cancel = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            terminate(machineProcess);
+            terminate(humanProcess);
+            cleanup();
+            reject(createAnalysisCancelledError());
+        };
+
+        const fail = (error: Error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            reject(error);
+        };
+
+        const complete = (result: string) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolve(result);
+        };
+
+        if (token.isCancellationRequested) {
+            cancel();
+            return;
+        }
+        if (token.onCancellationRequested) {
+            cancellationDisposable = token.onCancellationRequested(cancel);
+        }
+        timeoutHandle = setTimeout(() => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            terminate(machineProcess);
+            terminate(humanProcess);
+            cleanup();
+            reject(new Error(localization.format(localization.getUI('analysisTimedOut'), STACKWALK_EXEC_TIMEOUT_MS)));
+        }, STACKWALK_EXEC_TIMEOUT_MS * 2);
+
         // First pass: pipe-separated machine format. Stable across Breakpad
         // releases and gives us module debug_ids, base addresses, and per-frame
         // function/source info — the foundation for accurate enhancement and
         // build-id verification.
-        execFile(exe, ['-m', dumpPath, symbolPath], { maxBuffer: 200 * 1024 * 1024 },
-            (mErr: Error | null, mStdout: string) => {
+        try {
+            machineProcess = execFile(
+                exe,
+                ['-m', dumpPath, symbolPath],
+                { maxBuffer: 200 * 1024 * 1024, encoding: 'utf8', timeout: STACKWALK_EXEC_TIMEOUT_MS },
+                (mErr: Error | null, mStdout: string) => {
+            if (settled) {
+                return;
+            }
             const machineDump: MachineDump | null = mErr || !mStdout
                 ? null
                 : parseMachineFormat(mStdout);
@@ -112,15 +345,30 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
 
             // Second pass: human-readable output. We keep this as the user-
             // facing format and overlay the machine data on top.
-            execFile(exe, [dumpPath, symbolPath], async (err: Error | null, stdout: string, stderr: string) => {
+            try {
+                humanProcess = execFile(
+                    exe,
+                    [dumpPath, symbolPath],
+                    { maxBuffer: 200 * 1024 * 1024, encoding: 'utf8', timeout: STACKWALK_EXEC_TIMEOUT_MS },
+                    async (err: Error | null, stdout: string, stderr: string) => {
+                if (settled) {
+                    return;
+                }
                 // Always log stderr for debugging
                 if (stderr && stderr.trim().length > 0) {
                     console.log(`minidump_stackwalk stderr: ${stderr}`);
                 }
 
-                // Check if we have valid output first, regardless of exit code
+                const assessment = assessStackwalkResult(
+                    stdout,
+                    stderr,
+                    machineDump?.frames.length ?? 0,
+                    Boolean(err),
+                );
+
+                // Do not treat stdout as success by itself. A broken dump can
+                // still yield a crash summary while all usable frames failed.
                 if (stdout && stdout.trim().length > 0) {
-                    // We have output, so the tool worked - clean it up for display
                     console.log(`minidump_stackwalk produced output (${stdout.length} characters)`);
 
                     // Clean up the output by separating debug info from actual crash data
@@ -129,33 +377,52 @@ export async function runStackwalk(context: vscode.ExtensionContext, dumpPath: s
                         symbolPath,
                     });
 
-                    // Try to enhance with symbols if available
-                    try {
-                        const enhancedOutput = await enhanceStackTraceWithSymbols(cleanOutput, symbolPath, machineDump ?? undefined);
-                        resolve(enhancedOutput);
-                    } catch (enhanceError: any) {
-                        console.log(`Symbol enhancement failed (proceeding with basic output): ${enhanceError.message}`);
-                        resolve(cleanOutput);
+                    const finish = (output: string) => {
+                        if (token.isCancellationRequested) {
+                            cancel();
+                            return;
+                        }
+                        complete(addStackwalkStatus(output, assessment, err));
+                    };
+
+                    // There is nothing reliable for symbol enhancement to
+                    // improve when no stack frame survived the tool output.
+                    if (assessment.status === 'invalid') {
+                        finish(cleanOutput);
+                    } else {
+                        try {
+                            const enhancedOutput = await enhanceStackTraceWithSymbols(cleanOutput, symbolPath, machineDump ?? undefined);
+                            finish(enhancedOutput);
+                        } catch (enhanceError: any) {
+                            console.log(`Symbol enhancement failed (proceeding with basic output): ${enhanceError.message}`);
+                            finish(cleanOutput);
+                        }
                     }
                 } else if (err) {
                     // No output and there was an error
                     console.error(`minidump_stackwalk error: ${err.message}`);
 
                     if (err.message.includes('ENOENT') || err.message.includes('command not found')) {
-                        reject(new Error('minidump_stackwalk tool not found. Please install breakpad tools.'));
+                        fail(new Error(localization.getUI('stackwalkToolNotFound')));
                     } else if (err.message.includes('Invalid dump file') || stderr.includes('Invalid dump file')) {
-                        reject(new Error('Invalid or corrupted dump file format.'));
+                        fail(new Error(localization.getUI('invalidDumpFile')));
                     } else if (err.message.includes('Permission denied')) {
-                        reject(new Error('Permission denied. Check file permissions for the dump file or binary.'));
+                        fail(new Error(localization.getUI('stackwalkPermissionDenied')));
                     } else {
-                        reject(new Error(`minidump_stackwalk execution failed: ${err.message}\n\nStderr: ${stderr}`));
+                        fail(new Error(localization.format(localization.getUI('stackwalkExecutionFailed'), err.message, stderr)));
                     }
                 } else {
                     // No output but no error either - this might be an empty dump or other issue
-                    resolve('No stack trace data found in the dump file. The dump might be empty or corrupted.');
+                    complete(addStackwalkStatus(localization.getUI('noStackTraceData'), assessment));
                 }
+                });
+            } catch (error) {
+                fail(error instanceof Error ? error : new Error(String(error)));
+            }
             });
-        });
+        } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
+        }
     });
 }
 
@@ -335,15 +602,15 @@ export function parseCrashSummary(output: string): CrashSummary {
             continue;
         }
 
-        // Count stack frames and stack-scan frames
-        if (trimmed.match(/^\d+\s+/)) {
-            summary.totalFrameCount++;
-        }
+        // Count stack-scan frames here; total frames are counted below with
+        // thread-section awareness so CPU details such as "8 CPUs" are not
+        // mistaken for stack frames.
         if (trimmed.startsWith('Found by:') && trimmed.toLowerCase().includes('stack scanning')) {
             summary.stackScanFrameCount++;
         }
     }
 
+    summary.totalFrameCount = countStackwalkFrames(output);
     return summary;
 }
 
@@ -765,15 +1032,22 @@ export function cleanStackwalkOutput(stdout: string, stderr: string, context?: C
 export async function analyzeDumpFile(context: vscode.ExtensionContext, dumpPath: string, symbolPath: string) {
     return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: "Analyzing dump file...",
-        cancellable: false
-    }, async (progress) => {
+        title: localization.getUI('analyzingDumpFile'),
+        cancellable: true,
+    }, async (progress, token) => {
         try {
-            progress.report({ increment: 10, message: "Preparing analysis..." });
+            if (token.isCancellationRequested) {
+                return;
+            }
+            progress.report({ increment: 10, message: localization.getUI('preparingAnalysis') });
             
-            const analysisResult = await runStackwalk(context, dumpPath, symbolPath);
+            const analysisResult = await runStackwalk(context, dumpPath, symbolPath, token);
+            if (token.isCancellationRequested) {
+                return;
+            }
+            const resultStatus = getStackwalkResultStatus(analysisResult);
             
-            progress.report({ increment: 50, message: "Processing results..." });
+            progress.report({ increment: 50, message: localization.getUI('processingAnalysisResults') });
             
             // Create a new document with the analysis result
             const doc = await vscode.workspace.openTextDocument({
@@ -781,13 +1055,39 @@ export async function analyzeDumpFile(context: vscode.ExtensionContext, dumpPath
                 language: 'plaintext'  // use plaintext instead of text，ensure hover provider can recognize
             });
             
-            progress.report({ increment: 100, message: "Analysis complete!" });
+            if (token.isCancellationRequested) {
+                return;
+            }
+            progress.report({
+                increment: 100,
+                message: localization.getUI(
+                    resultStatus === 'complete'
+                        ? 'analysisComplete'
+                        : resultStatus === 'partial'
+                            ? 'analysisPartial'
+                            : 'analysisInvalid',
+                ),
+            });
             
             await vscode.window.showTextDocument(doc);
             
-            vscode.window.showInformationMessage(localization.format(localization.getUI('dumpFileAnalysisCompleted'), path.basename(dumpPath)));
+            if (resultStatus === 'complete') {
+                vscode.window.showInformationMessage(
+                    localization.format(localization.getUI('dumpFileAnalysisCompleted'), path.basename(dumpPath)),
+                );
+            } else {
+                vscode.window.showWarningMessage(
+                    localization.format(
+                        localization.getUI(resultStatus === 'partial' ? 'dumpFileAnalysisPartial' : 'dumpFileAnalysisInvalid'),
+                        path.basename(dumpPath),
+                    ),
+                );
+            }
             
-        } catch (error: any) {
+        } catch (error: unknown) {
+            if (isAnalysisCancelledError(error)) {
+                return;
+            }
             throw error;
         }
     });

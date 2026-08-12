@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import * as fs from 'fs';
-import * as vscode from 'vscode';
+import { getCustomLlvmUndnamePath, isValidLlvmUndnamePath } from '../config/config';
 
 /**
  * Best-effort MSVC C++ symbol demangler powered by llvm-undname.
@@ -20,9 +20,8 @@ const UNDNAME_BINARY = process.platform === 'win32' ? 'llvm-undname.exe' : 'llvm
 let cachedAvailability: boolean | null = null;
 
 function getCommand(): string {
-    const cfg = vscode.workspace.getConfiguration('minidump-parser');
-    const custom = cfg.get<string>('customLlvmUndnamePath');
-    if (custom && fs.existsSync(custom)) {
+    const custom = getCustomLlvmUndnamePath();
+    if (custom && fs.existsSync(custom) && isValidLlvmUndnamePath(custom)) {
         return custom;
     }
     return UNDNAME_BINARY;

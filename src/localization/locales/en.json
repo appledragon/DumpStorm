@@ -310,6 +310,8 @@
     "chooseLanguage": "Choose language",
     "english": "English",
     "chineseSimplified": "简体中文",
+    "nativeEnglishName": "English",
+    "nativeChineseName": "Simplified Chinese",
     "clickToSwitch": "(Click to switch)",
     "singleFile": "Single File",
     "singleFileDesc": "Extract symbols from a single binary file",
@@ -406,7 +408,89 @@
     "installingStackwalkAlternative": "Installing minidump_stackwalk (Alternative)...",
     "stackwalkInstallationSuccess": "✅ Good choice! Using recommended reliable download method...",
     "clickToOpenInstallFolder": "Click to open install folder",
-    "systemPath": "Available via system PATH"
+    "systemPath": "Available via system PATH",
+    "notConfigured": "Not configured",
+    "customDumpSymsPath": "Custom dump_syms",
+    "customLlvmUndnamePath": "Custom llvm-undname",
+    "setCustomDumpSymsPath": "Set custom dump_syms path",
+    "setCustomLlvmUndnamePath": "Set custom llvm-undname path",
+    "selectDumpSymsExecutable": "Select dump_syms executable",
+    "selectLlvmUndnameExecutable": "Select llvm-undname executable",
+    "customDumpSymsPathSet": "Custom dump_syms path set to: {0}",
+    "customLlvmUndnamePathSet": "Custom llvm-undname path set to: {0}",
+    "invalidDumpSymsExecutable": "Selected file is not a valid dump_syms executable.",
+    "invalidLlvmUndnameExecutable": "Selected file is not a valid llvm-undname executable.",
+    "resetCustomPaths": "Reset custom tool paths",
+    "extractingSymbolsWithNm": "Extracting symbols with nm...",
+    "runningNmCommand": "Running {0} command...",
+    "processingSymbolData": "Processing symbol data...",
+    "symbolExtractionCompleted": "Symbol extraction completed!",
+    "batchExtractingSymbols": "Batch extracting symbols...",
+    "dumpSymsUnavailable": "dump_syms is not available. Install Breakpad's dump_syms, ensure it is on PATH, or set \"minidump-parser.customDumpSymsPath\".",
+    "singleBreakpadBinary": "Single binary",
+    "singleBreakpadBinaryDetail": "Pick one .exe / .dll / .so / .dylib",
+    "directoryBreakpad": "Directory (recursive)",
+    "directoryBreakpadDetail": "Run dump_syms over every binary under a folder",
+    "breakpadExtraction": "Breakpad symbol extraction",
+    "chooseBreakpadExtractionMode": "Choose extraction mode",
+    "selectBreakpadBinary": "Select binary for dump_syms",
+    "selectBreakpadDirectory": "Select directory to scan with dump_syms",
+    "breakpadExtractionSummary": "dump_syms: {0} succeeded, {1} failed.",
+    "breakpadExtractionFailed": "dump_syms failed: {0}",
+    "selectSymbolDirectory": "Select Symbol Directory",
+    "currentLanguage": "✓ Current Language",
+    "languageTooltip": "Currently selected language for tooltips",
+    "switchToLanguage": "Switch to {0}",
+    "selectLanguage": "Select Language / 选择语言",
+    "dumpFilesFilter": "Dump Files",
+    "allFilesFilter": "All Files",
+    "executableFilesFilter": "Executable Files",
+    "breakpadSymbolExtracted": "Extracted .sym for {0} ({1}…)",
+    "breakpadBinaryNotFound": "Binary not found: {0}",
+    "dumpSymsNoModuleHeader": "dump_syms produced no MODULE header for {0}; the binary may be stripped or unsupported.",
+    "dumpSymsNotFound": "dump_syms not found. Install Breakpad's dump_syms, ensure it is on PATH, or set \"minidump-parser.customDumpSymsPath\".",
+    "dumpSymsFailedForFile": "dump_syms failed for {0}: {1}",
+    "closeDumpFileError": "Error closing dump file: {0}",
+    "manualLlvmNmGuideOpened": "LLVM-NM manual installation guide opened",
+    "analyzingDumpFile": "Analyzing dump file...",
+    "preparingAnalysis": "Preparing analysis...",
+    "processingAnalysisResults": "Processing analysis results...",
+    "analysisComplete": "Analysis complete!",
+    "analysisPartial": "Partial analysis",
+    "analysisInvalid": "Invalid analysis",
+    "dumpFileAnalysisPartial": "Dump file analysis is partial for: {0}. The stackwalk tool reported serious diagnostics.",
+    "dumpFileAnalysisInvalid": "Dump file analysis is invalid for: {0}. No usable stack frames were produced.",
+    "partialAnalysisResult": "Serious stackwalk diagnostics were reported; treat this output as partial.",
+    "invalidAnalysisResult": "No usable stack frames were produced; the dump could not be analyzed reliably."
+    ,"downloadingTool": "Downloading {0} binary file..."
+    ,"extractingTool": "Extracting {0} binary files..."
+    ,"installingTool": "Installing {0} to .dumpstorm/bin directory..."
+    ,"toolInstallationCompleted": "{0} installation completed successfully!"
+    ,"nmUnavailable": "nm command not found. Please install Xcode Command Line Tools on macOS or build-essential on Linux."
+    ,"nmCommandNotFound": "{0} command not found. Please ensure developer tools are installed."
+    ,"nmCommandFailed": "{0} command failed: {1}"
+    ,"noSymbolsFound": "No symbols found in {0}. The binary may be stripped or not contain symbol information."
+    ,"analysisCancelled": "Dump analysis was cancelled."
+    ,"analysisTimedOut": "Dump analysis timed out after {0} ms."
+    ,"stackwalkToolNotFound": "minidump_stackwalk tool not found. Please install Breakpad tools."
+    ,"invalidDumpFile": "Invalid or corrupted dump file format."
+    ,"stackwalkPermissionDenied": "Permission denied. Check file permissions for the dump file or binary."
+    ,"stackwalkExecutionFailed": "minidump_stackwalk execution failed: {0}\n\nStderr: {1}"
+    ,"noStackTraceData": "No stack trace data found in the dump file. The dump might be empty or corrupted."
+    ,"nmToolLabel": "nm/llvm-nm"
+    ,"stackwalkToolLabel": "minidump_stackwalk"
+    ,"customPathStatus": "✅ Custom Path"
+    ,"aboutMessage": "Minidump Parser\n\nVersion: {0}\nAuthor: AppleDragon\n\nGitHub: https://github.com/appledragon/DumpStorm"
+    ,"github": "GitHub"
+    ,"close": "Close"
+    ,"userCancelledInstallation": "User cancelled installation."
+    ,"failedToMakeBinaryExecutable": "Failed to make binary executable: {0}"
+  },
+  "manualGuide": {
+    "stackwalkWindows": "# Windows Manual Installation\n\n1. Download the tool package:\n   {0}\n\n2. Extract the downloaded zip file.\n\n3. Create `%USERPROFILE%\\\\.dumpstorm\\\\bin` and copy `minidump_stackwalk.exe` there.\n\n4. Restart VS Code and try again.\n\nPowerShell:\n```powershell\nInvoke-WebRequest -Uri \"{0}\" -OutFile \"breakpad.zip\"\nExpand-Archive -Path \"breakpad.zip\" -DestinationPath \"breakpad-extract\"\nNew-Item -ItemType Directory -Force -Path \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\"\nCopy-Item \"breakpad-extract\\\\*\\\\minidump_stackwalk.exe\" \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\\\\\" -Force\n```",
+    "stackwalkUnix": "# {0} Manual Installation\n\n1. Download the tool package:\n   {1}\n\n2. Extract it, then copy `minidump_stackwalk` to `~/.dumpstorm/bin/`.\n\n3. Run `chmod +x ~/.dumpstorm/bin/minidump_stackwalk`.\n\n4. Restart VS Code and try again.",
+    "llvmNmWindows": "# Manual LLVM-NM Installation for Windows\n\n1. Download and extract `llvm-nm-windows-x64.zip` from the LLVM nightly releases.\n2. Copy `llvm-nm.exe` to `%USERPROFILE%\\\\.dumpstorm\\\\bin\\\\`.\n3. Restart VS Code.\n\nPowerShell:\n```powershell\n$url = \"https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-windows-x64.zip\"\n$zip = \"$env:TEMP\\\\llvm-nm.zip\"\nInvoke-WebRequest -Uri $url -OutFile $zip\nExpand-Archive -Path $zip -DestinationPath \"$env:TEMP\\\\llvm-nm\" -Force\nCopy-Item \"$env:TEMP\\\\llvm-nm\\\\*\\\\llvm-nm.exe\" \"$env:USERPROFILE\\\\.dumpstorm\\\\bin\\\\\" -Force\n```",
+    "llvmNmUnix": "# Manual LLVM-NM Installation for {0}\n\n1. Download `llvm-nm-{1}.tar.gz` from the LLVM nightly releases.\n2. Extract it and copy `llvm-nm` to `~/.dumpstorm/bin/`.\n3. Run `chmod +x ~/.dumpstorm/bin/llvm-nm`.\n4. Restart VS Code."
   },
   "values": {
     "nullPointer": "NULL pointer",

@@ -9,6 +9,9 @@ export interface LocalizedStrings {
     errors: { [key: string]: string };
     crash: { [key: string]: string };
     debugTips: { [key: string]: string };
+    batchExtraction: { [key: string]: string };
+    installer: { [key: string]: string };
+    [key: string]: unknown;
 }
 
 export interface RegisterStrings {
@@ -136,8 +139,32 @@ export class LocalizationManager {
 
     // Get localized UI string
     public getString(category: keyof LocalizedStrings, key: string): string {
-        const categoryStrings = this.strings[category] as { [key: string]: string };
-        return categoryStrings[key] || key;
+        const categoryStrings = this.strings[category];
+        const categoryValue = this.resolvePath(categoryStrings, key);
+        if (typeof categoryValue === 'string') {
+            return categoryValue;
+        }
+
+        // Some locale sections (for example installer and batchExtraction)
+        // are intentionally kept outside "ui". Support namespaced keys such
+        // as getUI('installer.downloadFailed') without returning the key.
+        const rootValue = this.resolvePath(this.strings, key);
+        return typeof rootValue === 'string' ? rootValue : key;
+    }
+
+    private resolvePath(value: unknown, key: string): unknown {
+        if (!value || typeof value !== 'object') {
+            return undefined;
+        }
+
+        let current: unknown = value;
+        for (const segment of key.split('.')) {
+            if (!current || typeof current !== 'object') {
+                return undefined;
+            }
+            current = (current as { [key: string]: unknown })[segment];
+        }
+        return current;
     }
 
     // Get UI string with fallback

@@ -6,8 +6,125 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { localization } from '../localization/localization';
-import { execFileSync, execSync } from 'child_process';
-import { BinaryInfo, ToolConfig } from './base-installer';
+import { spawn, execFileSync } from 'child_process';
+import { appendTempSuffix, BinaryInfo, getPowerShellArchiveArgs, ToolConfig } from './base-installer';
+import { DOWNLOAD_TIMEOUT_MS, MAX_DOWNLOAD_REDIRECTS, DownloadCancellationToken, DownloadError } from './download';
+
+function downloadWithCurl(
+    downloadUrl: string,
+    destination: string,
+    token: DownloadCancellationToken,
+): Promise<void> {
+    const timeoutSeconds = Math.max(1, Math.ceil(DOWNLOAD_TIMEOUT_MS / 1000));
+
+    return new Promise<void>((resolve, reject) => {
+        let child: ReturnType<typeof spawn> | undefined;
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        let cancellationDisposable: { dispose(): void } | undefined;
+        let stderr = '';
+        let settled = false;
+
+        const cleanup = () => {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+                timeoutHandle = undefined;
+            }
+            cancellationDisposable?.dispose();
+            cancellationDisposable = undefined;
+        };
+
+        const removePartialDestination = () => {
+            try {
+                if (fs.existsSync(destination)) {
+                    fs.unlinkSync(destination);
+                }
+            } catch {
+                // Preserve the download error if cleanup itself fails.
+            }
+        };
+
+        const fail = (error: unknown) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            child?.kill?.();
+            removePartialDestination();
+            reject(error instanceof Error ? error : new Error(String(error)));
+        };
+
+        const complete = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolve();
+        };
+
+        if (token.isCancellationRequested) {
+            fail(new DownloadError('Download cancelled by user', 'DOWNLOAD_CANCELLED'));
+            return;
+        }
+
+        try {
+            child = spawn('curl', [
+                '--fail',
+                '--silent',
+                '--show-error',
+                '--location',
+                '--max-redirs', String(MAX_DOWNLOAD_REDIRECTS),
+                '--connect-timeout', String(timeoutSeconds),
+                '--max-time', String(timeoutSeconds),
+                '--output', destination,
+                downloadUrl,
+            ], {
+                stdio: ['ignore', 'ignore', 'pipe'],
+            });
+        } catch (error) {
+            fail(error);
+            return;
+        }
+
+        if (!child) {
+            fail(new Error('Unable to start curl'));
+            return;
+        }
+
+        child.stderr?.setEncoding?.('utf8');
+        child.stderr?.on?.('data', (chunk: string) => {
+            stderr += chunk;
+        });
+        child.on('error', error => {
+            fail(error);
+        });
+        child.on('close', (code, signal) => {
+            if (settled) {
+                return;
+            }
+            if (code === 0) {
+                complete();
+            } else {
+                const detail = stderr.trim() || `curl exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}`;
+                fail(new Error(detail));
+            }
+        });
+
+        timeoutHandle = setTimeout(() => {
+            fail(new DownloadError(
+                `Download timed out after ${DOWNLOAD_TIMEOUT_MS} ms`,
+                'DOWNLOAD_TIMEOUT',
+            ));
+        }, DOWNLOAD_TIMEOUT_MS);
+
+        if (token.onCancellationRequested) {
+            cancellationDisposable = token.onCancellationRequested(() => {
+                fail(new DownloadError('Download cancelled by user', 'DOWNLOAD_CANCELLED'));
+            });
+        }
+    });
+}
 
 /**
  * Base curl installer class with common installation logic using curl
@@ -23,39 +140,58 @@ export abstract class CurlBaseInstaller {
     /**
      * Install tool automatically using curl
      */
-    public async install(): Promise<void> {
-        const platform = os.platform();
-        const arch = os.arch();
-        
-        const binaryInfo = this.getBinaryInfo(platform, arch);
-
+    public async install(): Promise<boolean> {
         // First show a modal information dialog
-        await vscode.window.showInformationMessage(
+        const confirmation = await vscode.window.showInformationMessage(
             this.getStartingInstallationMessage(),
             { modal: true }, 
             'OK'
         );
+        if (confirmation !== 'OK') {
+            return false;
+        }
+
+        return this.installConfirmed();
+    }
+
+    /**
+     * Run the installation after the caller has confirmed it.
+     *
+     * Curl-based subclasses can provide a localized confirmation dialog with
+     * tool-specific actions without showing a second generic dialog.
+     */
+    protected async installConfirmed(): Promise<boolean> {
+        const platform = os.platform();
+        const arch = os.arch();
+        const binaryInfo = this.getBinaryInfo(platform, arch);
 
         // Show a persistent progress dialog
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: this.getInstallingMessage(),
-            cancellable: true
-        }, async (progress, token) => {
-            
-            // Show initial status
-            progress.report({ 
-                increment: 0, 
-                message: localization.getUI('installationStarting')
+        try {
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: this.getInstallingMessage(),
+                cancellable: true
+            }, async (progress, token) => {
+
+                // Show initial status
+                progress.report({
+                    increment: 0,
+                    message: localization.getUI('installationStarting')
+                });
+
+                // Add a delay to ensure user sees the initial message
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                return new Promise<void>((resolveProgress, rejectProgress) => {
+                    this.installWithCurl(binaryInfo, progress, resolveProgress, rejectProgress, token);
+                });
             });
-            
-            // Add a delay to ensure user sees the initial message
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            return new Promise<void>((resolveProgress, rejectProgress) => {
-                this.installWithCurl(binaryInfo, progress, resolveProgress, rejectProgress, token);
-            });
-        });
+        } catch (error) {
+            if (String(error) === localization.getUI('installer.installationCancelledByUser')) {
+                return false;
+            }
+            throw error;
+        }
         
         // Show final confirmation modal
         await vscode.window.showInformationMessage(
@@ -63,6 +199,7 @@ export abstract class CurlBaseInstaller {
             { modal: true }, 
             'OK'
         );
+        return true;
     }
 
     /**
@@ -98,21 +235,43 @@ export abstract class CurlBaseInstaller {
 
             // Determine file extension and temp file name
             const isZip = platform === 'win32';
-            const tempFile = path.join(os.tmpdir(), isZip ? config.INSTALL_PATHS.TEMP_ZIP : (config.INSTALL_PATHS.TEMP_TAR || 'temp-download.tar.gz'));
-            const tempDir = path.join(os.tmpdir(), config.INSTALL_PATHS.TEMP_EXTRACT);
+            const tempSuffix = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            const tempFile = path.join(
+                os.tmpdir(),
+                appendTempSuffix(
+                    path.basename(isZip ? config.INSTALL_PATHS.TEMP_ZIP : (config.INSTALL_PATHS.TEMP_TAR || 'temp-download.tar.gz')),
+                    tempSuffix,
+                ),
+            );
+            const tempDir = path.join(
+                os.tmpdir(),
+                appendTempSuffix(path.basename(config.INSTALL_PATHS.TEMP_EXTRACT), tempSuffix),
+            );
             
             // Clean up existing temp files
             this.cleanupTempFiles(tempFile, tempDir);
             
-            progress.report({ increment: 10, message: `Downloading ${binaryInfo.toolName} binary file...` });
+            progress.report({
+                increment: 10,
+                message: localization.format(localization.getUI('downloadingTool'), binaryInfo.toolName),
+            });
             
-            // Download using curl (use execFileSync to avoid command injection)
+            // Download using curl. --location follows 301/302/303/307/308,
+            // while --max-time and the cancellation listener stop stuck downloads.
             try {
-                console.log(`Downloading with curl: curl -L -o "${tempFile}" "${binaryInfo.downloadUrl}"`);
-                execFileSync('curl', ['-L', '-o', tempFile, binaryInfo.downloadUrl], { stdio: 'inherit' });
+                console.log(`Downloading with curl to "${tempFile}"`);
+                await downloadWithCurl(
+                    binaryInfo.downloadUrl,
+                    tempFile,
+                    token as DownloadCancellationToken,
+                );
                 console.log(`Download completed to: ${tempFile}`);
             } catch (downloadError: any) {
-                reject(localization.format(localization.getUI('installer.downloadFailed'), downloadError.message));
+                if (token.isCancellationRequested || downloadError?.code === 'DOWNLOAD_CANCELLED') {
+                    reject(localization.getUI('installer.installationCancelledByUser'));
+                } else {
+                    reject(localization.format(localization.getUI('installer.downloadFailed'), downloadError.message));
+                }
                 return;
             }
             
@@ -127,7 +286,10 @@ export abstract class CurlBaseInstaller {
                 return;
             }
             
-            progress.report({ increment: 40, message: `Extracting ${binaryInfo.toolName} binary files...` });
+            progress.report({
+                increment: 40,
+                message: localization.format(localization.getUI('extractingTool'), binaryInfo.toolName),
+            });
             
             try {
                 // Create temp extraction directory
@@ -139,17 +301,20 @@ export abstract class CurlBaseInstaller {
                 // Extract based on platform
                 if (isZip) {
                     // Windows: use PowerShell to extract zip
-                    const extractCommand = `powershell -command "Expand-Archive -Path '${tempFile}' -DestinationPath '${tempDir}' -Force"`;
-                    console.log(`Extracting with command: ${extractCommand}`);
-                    execSync(extractCommand);
+                    console.log(`Extracting archive with PowerShell using parameterized paths`);
+                    execFileSync('powershell.exe', getPowerShellArchiveArgs(tempFile, tempDir));
                 } else {
                     // Unix: use tar to extract tar.gz
-                    const extractCommand = `tar -xzf "${tempFile}" -C "${tempDir}"`;
-                    console.log(`Extracting with command: ${extractCommand}`);
-                    execSync(extractCommand, { encoding: 'utf8' });
+                    console.log(`Extracting archive with parameterized tar arguments`);
+                    execFileSync('tar', ['-xzf', tempFile, '-C', tempDir], { encoding: 'utf8' });
                 }
                 
                 console.log(`Extraction completed to: ${tempDir}`);
+
+                if (token.isCancellationRequested) {
+                    reject(localization.getUI('installer.installationCancelledByUser'));
+                    return;
+                }
                 
                 // Verify extraction
                 if (!fs.existsSync(tempDir)) {
@@ -164,7 +329,10 @@ export abstract class CurlBaseInstaller {
                     return;
                 }
                 
-                progress.report({ increment: 70, message: `Installing ${binaryInfo.toolName} to .dumpstorm/bin directory...` });
+                progress.report({
+                    increment: 70,
+                    message: localization.format(localization.getUI('installingTool'), binaryInfo.toolName),
+                });
                 
                 // List all files for debugging
                 const allFiles = this.listAllFiles(tempDir);
@@ -182,6 +350,10 @@ export abstract class CurlBaseInstaller {
                 }
                 
                 // Copy binary to dumpstorm bin directory
+                if (token.isCancellationRequested) {
+                    reject(localization.getUI('installer.installationCancelledByUser'));
+                    return;
+                }
                 const targetPath = path.join(dumpstormDir, binaryInfo.binaryName);
                 fs.copyFileSync(mainExecutable, targetPath);
                 
@@ -192,22 +364,37 @@ export abstract class CurlBaseInstaller {
                 
                 console.log(`Installed ${binaryInfo.toolName} to: ${targetPath}`);
                 
-                progress.report({ increment: 100, message: `${binaryInfo.toolName} installation completed successfully!` });
+                progress.report({
+                    increment: 100,
+                    message: localization.format(localization.getUI('toolInstallationCompleted'), binaryInfo.toolName),
+                });
                 
                 // Clean up temp files
                 this.cleanupTempFiles(tempFile, tempDir);
                 
                 // Keep the progress dialog open for a few seconds so user can see completion
                 setTimeout(() => {
-                    resolve();
+                    if (token.isCancellationRequested) {
+                        reject(localization.getUI('installer.installationCancelledByUser'));
+                    } else {
+                        resolve();
+                    }
                 }, 2000);
                 
-            } catch (extractError) {
-                reject(localization.format(localization.getUI('installer.failedToExtractBinary'), extractError));
+            } catch (extractError: any) {
+                if (token.isCancellationRequested) {
+                    reject(localization.getUI('installer.installationCancelledByUser'));
+                } else {
+                    reject(localization.format(localization.getUI('installer.failedToExtractBinary'), extractError));
+                }
             }
             
         } catch (error) {
-            reject(localization.format(localization.getUI('installer.installationFailed'), error));
+            if (token.isCancellationRequested) {
+                reject(localization.getUI('installer.installationCancelledByUser'));
+            } else {
+                reject(localization.format(localization.getUI('installer.installationFailed'), error));
+            }
         }
     }
 

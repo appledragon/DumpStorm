@@ -2,7 +2,19 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { DEFAULT_CONFIG, isNmAvailable, getNmCommand, getCustomMinidumpStackwalkPath, getCustomNmPath, getCustomLlvmNmPath, MINIDUMP_STACKWALK_CONFIG, getBinaryName, getLlvmNmBinaryName } from '../config/config';
+import {
+    DEFAULT_CONFIG,
+    isNmAvailable,
+    getNmCommand,
+    getCustomMinidumpStackwalkPath,
+    getCustomNmPath,
+    getCustomLlvmNmPath,
+    getCustomDumpSymsPath,
+    getCustomLlvmUndnamePath,
+    MINIDUMP_STACKWALK_CONFIG,
+    getBinaryName,
+    getLlvmNmBinaryName,
+} from '../config/config';
 import { installMinidumpStackwalk } from '../tools/minidump-stackwalk-installer';
 import { installLlvmNm } from '../tools/llvm-nm-installer';
 import { installMinidumpStackwalkWithCurl } from '../tools/minidump-stackwalk-installer-curl';
@@ -76,9 +88,14 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const customMinidumpPath = getCustomMinidumpStackwalkPath();
             const customNmPath = getCustomNmPath();
             const customLlvmNmPath = getCustomLlvmNmPath();
+            const customDumpSymsPath = getCustomDumpSymsPath();
+            const customLlvmUndnamePath = getCustomLlvmUndnamePath();
             const currentLanguage = localization.getCurrentLocale();
-            const languageDisplayName = currentLanguage === 'en' ? 'English' : 
-                                       currentLanguage === 'zh-cn' ? '简体中文' : currentLanguage;
+            const languageDisplayName = currentLanguage === 'en'
+                ? localization.getUI('english')
+                : currentLanguage === 'zh-cn'
+                    ? localization.getUI('chineseSimplified')
+                    : currentLanguage;
             
             const items: BreakpadItem[] = [
                 new BreakpadItem(
@@ -144,6 +161,42 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 ));
             }
 
+            items.push(
+                new BreakpadItem(
+                    `${localization.getUI('customDumpSymsPath')}: ${customDumpSymsPath ? path.basename(customDumpSymsPath) : localization.getUI('notConfigured')}`,
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'minidump-parser.setCustomDumpSymsPath',
+                        title: localization.getUI('setCustomDumpSymsPath'),
+                        arguments: [],
+                    },
+                    'customDumpSymsPath',
+                ),
+                new BreakpadItem(
+                    `${localization.getUI('customLlvmUndnamePath')}: ${customLlvmUndnamePath ? path.basename(customLlvmUndnamePath) : localization.getUI('notConfigured')}`,
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'minidump-parser.setCustomLlvmUndnamePath',
+                        title: localization.getUI('setCustomLlvmUndnamePath'),
+                        arguments: [],
+                    },
+                    'customLlvmUndnamePath',
+                ),
+            );
+
+            if (customMinidumpPath || customNmPath || customLlvmNmPath || customDumpSymsPath || customLlvmUndnamePath) {
+                items.push(new BreakpadItem(
+                    localization.getUI('resetCustomPaths'),
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'minidump-parser.resetCustomPaths',
+                        title: localization.getUI('resetCustomPaths'),
+                        arguments: [],
+                    },
+                    'resetCustomPaths',
+                ));
+            }
+
             return items;
         } else if (element.contextValue === 'tools') {
             // Tool status items
@@ -164,7 +217,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const nmStatus = nmIsAvailable ? localization.getUI('autoInstalled') : localization.getUI('notFound');
             
             const nmItem = new BreakpadItem(
-                `nm/llvm-nm: ${nmStatus}`,
+                `${localization.getUI('nmToolLabel')}: ${nmStatus}`,
                 vscode.TreeItemCollapsibleState.None,
                 nmBinaryPath ? {
                     command: 'minidump-parser.revealToolPath',
@@ -211,7 +264,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 let stackwalkBinaryPath: string | undefined;
                 
                 if (customPath && fs.existsSync(customPath)) {
-                    stackwalkStatus = '\u2705 Custom Path';
+                    stackwalkStatus = localization.getUI('customPathStatus');
                     stackwalkBinaryPath = customPath;
                 } else {
                     // Check if auto-installed version exists in ~/.dumpstorm/bin
@@ -225,7 +278,7 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
                 }
                 
                 const stackwalkItem = new BreakpadItem(
-                    `minidump_stackwalk: ${stackwalkStatus}`,
+                    `${localization.getUI('stackwalkToolLabel')}: ${stackwalkStatus}`,
                     vscode.TreeItemCollapsibleState.None,
                     stackwalkBinaryPath ? {
                         command: 'minidump-parser.revealToolPath',
@@ -478,30 +531,35 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
             const isRecommendedMethod = method.label.includes('⭐') || method.label === localization.getUI('alternativeInstallation');
             const isStandardMethod = method.label === localization.getUI('standardInstallation');
             const isManualMethod = method.label === localization.getUI('manualInstallation');
+            let installed = false;
 
             if (isStandardMethod) {
-                await vscode.window.withProgress({
+                installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingStackwalkStandard'),
                     cancellable: false
                 }, async (progress) => {
-                    await installMinidumpStackwalk();
+                    return installMinidumpStackwalk();
                 });
             } else if (isRecommendedMethod) {
                 // Use curl-based installer
-                await vscode.window.withProgress({
+                installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingStackwalkAlternative'),
                     cancellable: false
                 }, async (progress) => {
-                    await installMinidumpStackwalkWithCurl();
+                    return installMinidumpStackwalkWithCurl();
                 });
             } else if (isManualMethod) {
                 // Show manual installation guide
                 this.showManualInstallationGuide();
                 return;
             }
-            
+
+            if (!installed) {
+                return;
+            }
+
             vscode.window.showInformationMessage(localization.getUI('installSuccess'));
             this.refresh();
         } catch (error: any) {
@@ -511,81 +569,18 @@ export class BreakpadPanelProvider implements vscode.TreeDataProvider<BreakpadIt
 
     private async showManualInstallationGuide() {
         const platform = os.platform();
-        let instructions = '';
-        
-        if (platform === 'win32') {
-            instructions = `# Windows Manual Installation
-
-1. Download the tool package:
-   URL: https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-windows-x64.zip
-
-2. Extract the downloaded zip file
-
-3. Create installation directory:
-   mkdir %USERPROFILE%\\.dumpstorm\\bin
-
-4. Copy minidump_stackwalk.exe to:
-   %USERPROFILE%\\.dumpstorm\\bin\\minidump_stackwalk.exe
-
-5. Restart VS Code and try again
-
-Alternative: Use PowerShell commands:
-\`\`\`powershell
-# Download
-Invoke-WebRequest -Uri "https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-windows-x64.zip" -OutFile "breakpad.zip"
-
-# Extract
-Expand-Archive -Path "breakpad.zip" -DestinationPath "breakpad-extract"
-
-# Install
-mkdir $env:USERPROFILE\\.dumpstorm\\bin
-copy breakpad-extract\\*\\minidump_stackwalk.exe $env:USERPROFILE\\.dumpstorm\\bin\\
-\`\`\``;
-        } else if (platform === 'darwin') {
-            const arch = os.arch();
-            const archSuffix = arch === 'arm64' ? 'arm64' : 'x86_64';
-            instructions = `# macOS Manual Installation
-
-1. Download the tool package:
-   URL: https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-macos-${archSuffix}.tar.gz
-
-2. Extract and install:
-\`\`\`bash
-# Download
-curl -L -o breakpad-macos-${archSuffix}.tar.gz https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-macos-${archSuffix}.tar.gz
-
-# Extract
-tar -xzf breakpad-macos-${archSuffix}.tar.gz
-
-# Install
-mkdir -p ~/.dumpstorm/bin
-cp */minidump_stackwalk ~/.dumpstorm/bin/
-chmod +x ~/.dumpstorm/bin/minidump_stackwalk
-\`\`\`
-
-3. Restart VS Code and try again`;
-        } else {
-            instructions = `# Linux Manual Installation
-
-1. Download the tool package:
-   URL: https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-linux-x86_64.tar.gz
-
-2. Extract and install:
-\`\`\`bash
-# Download
-curl -L -o breakpad-linux-x86_64.tar.gz https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-linux-x86_64.tar.gz
-
-# Extract
-tar -xzf breakpad-linux-x86_64.tar.gz
-
-# Install
-mkdir -p ~/.dumpstorm/bin
-cp */minidump_stackwalk ~/.dumpstorm/bin/
-chmod +x ~/.dumpstorm/bin/minidump_stackwalk
-\`\`\`
-
-3. Restart VS Code and try again`;
-        }
+        const isWindows = platform === 'win32';
+        const archSuffix = os.arch() === 'arm64' ? 'arm64' : 'x86_64';
+        const downloadUrl = isWindows
+            ? 'https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-windows-x64.zip'
+            : `https://github.com/appledragon/breakpad/releases/download/nightly/breakpad-${platform === 'darwin' ? 'macos' : 'linux'}-${archSuffix}.tar.gz`;
+        const instructions = isWindows
+            ? localization.format(localization.getUI('manualGuide.stackwalkWindows'), downloadUrl)
+            : localization.format(
+                localization.getUI('manualGuide.stackwalkUnix'),
+                platform === 'darwin' ? 'macOS' : 'Linux',
+                downloadUrl,
+            );
 
         // Create a new document with the instructions
         const doc = await vscode.workspace.openTextDocument({
@@ -649,30 +644,35 @@ chmod +x ~/.dumpstorm/bin/minidump_stackwalk
             const isRecommendedMethod = method.label.includes('⭐') || method.label === localization.getUI('alternativeInstallationLlvm');
             const isStandardMethod = method.label === localization.getUI('standardInstallationLlvm');
             const isManualMethod = method.label === localization.getUI('manualInstallation');
+            let installed = false;
 
             if (isStandardMethod) {
-                await vscode.window.withProgress({
+                installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingLlvmNmStandard'),
                     cancellable: false
                 }, async (progress) => {
-                    await installLlvmNm();
+                    return installLlvmNm();
                 });
             } else if (isRecommendedMethod) {
                 // Use curl-based installer
-                await vscode.window.withProgress({
+                installed = await vscode.window.withProgress({
                     location: vscode.ProgressLocation.Notification,
                     title: localization.getUI('installingLlvmNmAlternative'),
                     cancellable: false
                 }, async (progress) => {
-                    await installLlvmNmWithCurl();
+                    return installLlvmNmWithCurl();
                 });
             } else if (isManualMethod) {
                 // Show manual installation guide for llvm-nm
                 this.showLlvmNmManualInstallationGuide();
                 return;
             }
-            
+
+            if (!installed) {
+                return;
+            }
+
             vscode.window.showInformationMessage(localization.getUI('llvmNmInstalledSuccessfully'));
             this.refresh();
         } catch (error: any) {
@@ -682,80 +682,15 @@ chmod +x ~/.dumpstorm/bin/minidump_stackwalk
 
     private showLlvmNmManualInstallationGuide() {
         const platform = os.platform();
-        let instructions = '';
-        
-        if (platform === 'win32') {
-            instructions = `
-# Manual LLVM-NM Installation for Windows
-
-## Method 1: Download from GitHub
-1. Visit: https://github.com/appledragon/llvm-project/releases/tag/nightly
-2. Download: llvm-nm-windows-x64.zip (or x86 for 32-bit)
-3. Extract the zip file
-4. Copy llvm-nm.exe to: %USERPROFILE%\\.dumpstorm\\bin\\
-5. Restart VS Code
-
-## Method 2: Use PowerShell
-\`\`\`powershell
-# Create directory
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.dumpstorm\\bin"
-
-# Download and extract
-$url = "https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-windows-x64.zip"
-$zip = "$env:TEMP\\llvm-nm.zip"
-Invoke-WebRequest -Uri $url -OutFile $zip
-Expand-Archive -Path $zip -DestinationPath "$env:TEMP\\llvm-nm" -Force
-Copy-Item "$env:TEMP\\llvm-nm\\*\\llvm-nm.exe" "$env:USERPROFILE\\.dumpstorm\\bin\\" -Force
-\`\`\`
-
-## Method 3: Use curl (if available)
-\`\`\`cmd
-curl -L -o %TEMP%\\llvm-nm.zip "https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-windows-x64.zip"
-\`\`\`
-`;
-        } else if (platform === 'darwin') {
-            const arch = os.arch();
-            const archSuffix = arch === 'arm64' ? 'arm64' : 'x86_64';
-            instructions = `
-# Manual LLVM-NM Installation for macOS
-
-## Download and Install
-1. Visit: https://github.com/appledragon/llvm-project/releases/tag/nightly
-2. Download: llvm-nm-macos-${archSuffix}.tar.gz
-3. Extract: tar -xzf llvm-nm-macos-${archSuffix}.tar.gz
-4. Copy llvm-nm to: ~/.dumpstorm/bin/
-5. Make executable: chmod +x ~/.dumpstorm/bin/llvm-nm
-
-## Using Terminal
-\`\`\`bash
-mkdir -p ~/.dumpstorm/bin
-curl -L -o /tmp/llvm-nm.tar.gz "https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-macos-${archSuffix}.tar.gz"
-tar -xzf /tmp/llvm-nm.tar.gz -C /tmp
-cp /tmp/*/llvm-nm ~/.dumpstorm/bin/
-chmod +x ~/.dumpstorm/bin/llvm-nm
-\`\`\`
-`;
-        } else {
-            instructions = `
-# Manual LLVM-NM Installation for Linux
-
-## Download and Install
-1. Visit: https://github.com/appledragon/llvm-project/releases/tag/nightly
-2. Download: llvm-nm-linux-x86_64.tar.gz
-3. Extract: tar -xzf llvm-nm-linux-x86_64.tar.gz
-4. Copy llvm-nm to: ~/.dumpstorm/bin/
-5. Make executable: chmod +x ~/.dumpstorm/bin/llvm-nm
-
-## Using Terminal
-\`\`\`bash
-mkdir -p ~/.dumpstorm/bin
-curl -L -o /tmp/llvm-nm.tar.gz "https://github.com/appledragon/llvm-project/releases/download/nightly/llvm-nm-linux-x86_64.tar.gz"
-tar -xzf /tmp/llvm-nm.tar.gz -C /tmp
-cp /tmp/*/llvm-nm ~/.dumpstorm/bin/
-chmod +x ~/.dumpstorm/bin/llvm-nm
-\`\`\`
-`;
-        }
+        const isWindows = platform === 'win32';
+        const archSuffix = os.arch() === 'arm64' ? 'arm64' : 'x86_64';
+        const instructions = isWindows
+            ? localization.getUI('manualGuide.llvmNmWindows')
+            : localization.format(
+                localization.getUI('manualGuide.llvmNmUnix'),
+                platform === 'darwin' ? 'macOS' : 'Linux',
+                `${platform === 'darwin' ? 'macos' : 'linux'}-${archSuffix}`,
+            );
 
         // Create and show document
         vscode.workspace.openTextDocument({
@@ -765,7 +700,7 @@ chmod +x ~/.dumpstorm/bin/llvm-nm
             vscode.window.showTextDocument(doc);
         });
 
-        vscode.window.showInformationMessage('LLVM-NM manual installation guide opened');
+        vscode.window.showInformationMessage(localization.getUI('manualLlvmNmGuideOpened'));
     }
 }
 

@@ -46,6 +46,11 @@ describe('LocalizationManager', () => {
       const result = manager.getUI('nonExistentKeyXYZ123');
       expect(result).toBe('nonExistentKeyXYZ123');
     });
+
+    it('should resolve nested locale keys from other sections', () => {
+      expect(manager.getUI('installer.downloadFailed')).not.toBe('installer.downloadFailed');
+      expect(manager.getUI('batchExtraction.failedFiles')).not.toBe('batchExtraction.failedFiles');
+    });
   });
 
   describe('getAvailableLocales', () => {

@@ -1,15 +1,23 @@
-import { execFile, execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { findDynamicLibraries, getNmCommand, isNmAvailable } from '../config/config';
 import { localization } from '../localization/localization';
 
+export function getBatchSymbolOutputPath(binaryPath: string, symbolPath: string): string {
+    const binaryName = path.basename(binaryPath, path.extname(binaryPath));
+    const sourceKey = path.normalize(path.resolve(binaryPath)).toLowerCase();
+    const pathHash = createHash('sha256').update(sourceKey).digest('hex').slice(0, 12);
+    return path.join(symbolPath, `${binaryName}_${pathHash}_nm.txt`);
+}
+
 export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: string) {
     try {
         // Check if nm is available
         if (!isNmAvailable()) {
-            throw new Error('nm command not found. Please install Xcode Command Line Tools on macOS or build-essential on Linux.');
+            throw new Error(localization.getUI('nmUnavailable'));
         }
         
         // Get the preferred nm command (nm or llvm-nm)
@@ -21,10 +29,13 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
         // Show progress
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "Extracting symbols with nm...",
+            title: localization.getUI('extractingSymbolsWithNm'),
             cancellable: false
         }, async (progress) => {
-            progress.report({ increment: 0, message: `Running ${nmCommand} command...` });
+            progress.report({
+                increment: 0,
+                message: localization.format(localization.getUI('runningNmCommand'), nmCommand),
+            });
             
             const binaryName = path.basename(binaryPath, path.extname(binaryPath));
             const outputFile = path.join(symbolPath, `${binaryName}_nm.txt`);
@@ -44,16 +55,23 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
                 }, (error, nmOutput, stderr) => {
                     if (error) {
                         if (error.message.includes('command not found') || (error as any).status === 127) {
-                            reject(`${nmCommand} command not found. Please ensure developer tools are installed (Xcode Command Line Tools on macOS).`);
+                            reject(localization.format(localization.getUI('nmCommandNotFound'), nmCommand));
                         } else if (error.message.includes('no symbols') || error.message.includes('not a dynamic object')) {
-                            reject(`No symbols found in ${path.basename(binaryPath)}. The binary may be stripped or not contain symbol information.`);
+                            reject(localization.format(
+                                localization.getUI('noSymbolsFound'),
+                                path.basename(binaryPath),
+                            ));
                         } else {
-                            reject(`${nmCommand} command failed: ${error.message || error}`);
+                            reject(localization.format(
+                                localization.getUI('nmCommandFailed'),
+                                nmCommand,
+                                error.message || error,
+                            ));
                         }
                         return;
                     }
                     
-                    progress.report({ increment: 50, message: "Processing symbol data..." });
+                    progress.report({ increment: 50, message: localization.getUI('processingSymbolData') });
                     
                     // Parse nm output and create a more readable format
                     const processedSymbols = processNmOutput(nmOutput, binaryName);
@@ -62,7 +80,7 @@ export async function extractSymbolsFromBinary(binaryPath: string, symbolPath: s
                     fs.writeFileSync(outputFile, processedSymbols);
                     console.log(`Symbols extracted to: ${outputFile}`);
                     
-                    progress.report({ increment: 100, message: "Symbol extraction completed!" });
+                    progress.report({ increment: 100, message: localization.getUI('symbolExtractionCompleted') });
                     
                     // Open the generated symbol file
                     vscode.workspace.openTextDocument(outputFile).then(doc => {
@@ -84,7 +102,7 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
     try {
         // Check if nm is available
         if (!isNmAvailable()) {
-            throw new Error('nm command not found. Please install Xcode Command Line Tools on macOS or build-essential on Linux.');
+            throw new Error(localization.getUI('nmUnavailable'));
         }
 
         // Find all dynamic libraries in the directory recursively
@@ -106,7 +124,7 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
         // Show progress with detailed reporting
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "Batch extracting symbols...",
+            title: localization.getUI('batchExtractingSymbols'),
             cancellable: false
         }, async (progress) => {
             const totalFiles = dynamicLibraries.length;
@@ -124,7 +142,7 @@ export async function extractSymbolsFromDirectory(directoryPath: string, symbolP
 
                 try {
                     const binaryName = path.basename(binaryPath, path.extname(binaryPath));
-                    const outputFile = path.join(symbolPath, `${binaryName}_nm.txt`);
+                    const outputFile = getBatchSymbolOutputPath(binaryPath, symbolPath);
                     
                     // Log the exact command being executed for debugging
                     console.log(`Batch processing: ${nmCommand} for ${binaryPath}`);

@@ -83,7 +83,7 @@ class LlvmNmCurlInstaller extends CurlBaseInstaller {
     /**
      * Override install method to add user confirmation
      */
-    public async install(): Promise<void> {
+    public async install(): Promise<boolean> {
         const choice = await vscode.window.showInformationMessage(
             this.getStartingInstallationMessage(),
             { modal: true },
@@ -92,18 +92,17 @@ class LlvmNmCurlInstaller extends CurlBaseInstaller {
         );
         
         if (choice !== localization.getUI('yesInstall')) {
-            return;
+            return false;
         }
 
-        // Call parent install method
-        await super.install();
+        return this.installConfirmed();
     }
 }
 
 /**
  * Install llvm-nm tool using curl (more reliable method)
  */
-export async function installLlvmNmWithCurl(): Promise<void> {
+export async function installLlvmNmWithCurl(): Promise<boolean> {
     const installer = new LlvmNmCurlInstaller();
-    await installer.install();
+    return installer.install();
 }

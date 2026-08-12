@@ -1,4 +1,8 @@
-import { processNmOutput, getSymbolTypeDescription } from '../src/symbols/extractor';
+import {
+  getBatchSymbolOutputPath,
+  processNmOutput,
+  getSymbolTypeDescription,
+} from '../src/symbols/extractor';
 
 // Mock vscode and other dependencies
 jest.mock('vscode', () => ({
@@ -54,6 +58,15 @@ describe('Symbol Extractor', () => {
       const result = processNmOutput('', 'empty');
       expect(result).toContain('=== SYMBOLS FOR empty ===');
     });
+  });
+
+  it('uses distinct output names for same-named binaries in different directories', () => {
+    const first = getBatchSymbolOutputPath('C:\\symbols\\one\\foo.dll', 'C:\\output');
+    const second = getBatchSymbolOutputPath('C:\\symbols\\two\\foo.dll', 'C:\\output');
+
+    expect(first).not.toBe(second);
+    expect(first).toMatch(/foo_[0-9a-f]{12}_nm\.txt$/i);
+    expect(second).toMatch(/foo_[0-9a-f]{12}_nm\.txt$/i);
   });
 
   describe('getSymbolTypeDescription', () => {
