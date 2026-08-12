@@ -4,65 +4,69 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish (leave empty for package.json version)'
-        required: false
-        type: string
 
 permissions:
   contents: read
-  actions: read
+
+concurrency:
+  group: marketplace-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        
-    - name: Install dependencies with fallback
-      run: |
-        npm ci || (echo "npm ci failed, trying with fresh install..." && npm cache clean --force && rm -rf node_modules package-lock.json && npm install)
-      
-    - name: Install VSCE globally
-      run: npm install -g @vscode/vsce
-      
-    - name: Update version if specified
-      if: github.event.inputs.version != ''
-      run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
-      
-    - name: Compile and build
-      run: npm run compile
-      
-    - name: Package extension
-      run: npm run package
-      
-    - name: Get package info
-      id: package-info
-      run: |
-        echo "name=$(node -p "require('./package.json').name")" >> $GITHUB_OUTPUT
-        echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-        
-    - name: Publish to VS Code Marketplace
-      run: npx @vscode/vsce publish --packagePath *.vsix
-      env:
-        VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        
-    - name: Publish to Open VSX Registry
-      run: npx ovsx publish *.vsix
-      env:
-        OVSX_PAT: ${{ secrets.OVSX_PAT }}
-      continue-on-error: true  # Open VSX 发布失败不影响主流程
-      
-    - name: Upload published package
-      uses: actions/upload-artifact@v4
-      with:
-        name: published-${{ steps.package-info.outputs.name }}-${{ steps.package-info.outputs.version }}
-        path: '*.vsix'
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Marketplace token
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::VSCE_PAT 未配置。请到 Settings → Secrets and variables → Actions → New repository secret，创建名为 VSCE_PAT 的仓库密钥。"
+            exit 1
+          fi
+
+      - name: Compile and validate
+        run: |
+          npm run compile
+          npm run validate:package
+
+      - name: Package extension
+        run: npm run package
+
+      - name: Get package info
+        id: package-info
+        run: |
+          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          shopt -s nullglob
+          files=( *.vsix )
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "::error::期望恰好 1 个 VSIX，实际找到 ${#files[@]} 个"
+            exit 1
+          fi
+          npx --no-install vsce publish --packagePath "${files[0]}" -p "$VSCE_PAT"
+
+      - name: Upload published package
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-${{ steps.package-info.outputs.name }}-${{ steps.package-info.outputs.version }}
+          path: '*.vsix'
+          if-no-files-found: error
